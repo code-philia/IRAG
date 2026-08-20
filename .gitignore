@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+
+frontend/node_modules/
+frontend/dist/
+
+# Local research assets and working notes are intentionally not published.
+data/
+docs/
+scripts/
+
+.env
+.env.*
