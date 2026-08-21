@@ -299,6 +299,11 @@ def _add_curated_recommendation_signals(
     }
     for lines in lines_by_block.values():
         for line in lines:
+            line["signals"] = [
+                signal for signal in line.get("signals", []) if signal.get("kind") != "uncovered_line"
+            ]
+    for lines in lines_by_block.values():
+        for line in lines:
             if 5 not in line.get("tokenIndices", []) or (int(line["lineNumber"]), 1) in explicit_matches:
                 continue
             line["signals"].append({
