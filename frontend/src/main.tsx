@@ -1733,8 +1733,14 @@ function CodeViewer({
             const hierarchyMatches = canvasLevel === "block" ? blockMatches : canvasLevel === "line" ? lineMatches : [];
             const hierarchyLine = allHierarchyLines.find((item) => item.lineNumber === line.lineNumber);
             const blockSignals = block && Array.isArray(block.signals) ? block.signals : [];
+            const blockLineSignals = block
+              ? allHierarchyLines
+                .filter((item) => block.lineNumbers.includes(item.lineNumber))
+                .flatMap((item) => Array.isArray(item.signals) ? item.signals : [])
+              : [];
+            const blockSignalTexts = [...new Set(hierarchySignalTexts([...blockSignals, ...blockLineSignals], candidate, conceptById))];
             const signalTexts = canvasLevel === "block"
-              ? hierarchySignalTexts(blockSignals, candidate, conceptById)
+              ? blockSignalTexts
               : canvasLevel === "line"
                 ? hierarchySignalTexts(hierarchyLine?.signals, candidate, conceptById)
                 : [];
