@@ -18,6 +18,12 @@ DEFAULT_DATASET_PATH = USER_STUDY_DATA_DIR / "python_filtered_cleaned_eval_proce
 DEFAULT_MATCH_PATH = XSEARCH_ROOT / "checkpoints/python/analysis/topk_matches_xsearch.json"
 DEFAULT_CHECKPOINT_PATH = XSEARCH_ROOT / "training_lab/checkpoints_lab/repro_python_coco_original_loss_1ep_csn/Epoch_1/subject_model_python.pth"
 LATEST_STEP_CHECKPOINT_PATH = XSEARCH_ROOT / "training_lab/checkpoints_lab/repro_python_coco_original_loss_1ep_csn/Step_7000/subject_model_python.pth"
+CODEBERT_BASE_PATH = Path(os.environ.get("CODEBERT_BASE_PATH", XSEARCH_ROOT.parent.parent / "codebert-base"))
+CODEBERT_CHECKPOINT_PATH = Path(os.environ.get(
+    "CODEBERT_CHECKPOINT_PATH",
+    XSEARCH_ROOT / "checkpoints/python_codebert/Epoch_2/subject_model_python.pth",
+))
+CODEBERT_INDEX_PATH = Path(os.environ.get("CODEBERT_INDEX_PATH", ROOT_DIR / "data" / "codebert_generic_index.npz"))
 LOCAL_COCOSODA_PATH = COCOSODA_PATH
 TRAINING_EVAL_RESULTS_DIR = XSEARCH_ROOT / "training_lab/eval_results/repro_python_coco_original_loss_1ep_csn"
 SMOKE_CODEBASE_PATH = XSEARCH_ROOT / "training_lab/eval_results/python_coco_smoke/codebase_first_200.jsonl"

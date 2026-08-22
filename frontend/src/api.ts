@@ -17,33 +17,33 @@ async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit, timeou
   }
 }
 
-export async function getExperiments(): Promise<{ tests: string[]; experiments: unknown[] }> {
+export async function getExperiments(): Promise<{ tests: string[]; experiments: unknown[]; models?: Array<{ id: string; name: string; available?: boolean }> }> {
   return fetchJson("/api/experiments");
 }
 
-export async function loadSession(testId: string): Promise<SessionPayload> {
+export async function loadSession(testId: string, model = "xsearch"): Promise<SessionPayload> {
   return fetchJson("/api/session/load", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ experimentId: "xsearch_user_study_python", testId, topK: 20, epoch: "final" })
+    body: JSON.stringify({ experimentId: "xsearch_user_study_python", model, testId, topK: 20, epoch: "final" })
   });
 }
 
-export async function loadSessionBootstrap(testId: string): Promise<{ session: SessionPayload; candidate: CandidateDetail; graph: VisualizationGraph }> {
+export async function loadSessionBootstrap(testId: string, model = "xsearch"): Promise<{ session: SessionPayload; candidate: CandidateDetail; graph: VisualizationGraph }> {
   return fetchJson("/api/session/bootstrap", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ experimentId: "xsearch_user_study_python", testId, topK: 20, epoch: "final" })
+    body: JSON.stringify({ experimentId: "xsearch_user_study_python", model, testId, topK: 20, epoch: "final" })
   });
 }
 
-export async function loadCandidate(testId: string, candidateId: string): Promise<CandidateDetail> {
-  return fetchJson(`/api/candidates/${candidateId}?test_id=${encodeURIComponent(testId)}`);
+export async function loadCandidate(testId: string, candidateId: string, model = "xsearch"): Promise<CandidateDetail> {
+  return fetchJson(`/api/candidates/${candidateId}?test_id=${encodeURIComponent(testId)}&model=${encodeURIComponent(model)}`);
 }
 
-export async function loadGraph(testId: string, candidateId: string, epoch = 4): Promise<VisualizationGraph> {
+export async function loadGraph(testId: string, candidateId: string, epoch = 4, model = "xsearch"): Promise<VisualizationGraph> {
   return fetchJson(
-    `/api/visualize/graph?test_id=${encodeURIComponent(testId)}&candidate_id=${encodeURIComponent(candidateId)}&epoch=${epoch}`
+    `/api/visualize/graph?test_id=${encodeURIComponent(testId)}&candidate_id=${encodeURIComponent(candidateId)}&epoch=${epoch}&model=${encodeURIComponent(model)}`
   );
 }
 
@@ -76,6 +76,7 @@ export async function createManualLink(payload: {
 }
 
 export async function applyDragRerank(payload: {
+  model?: string;
   testId: string;
   candidateId: string;
   draggedNode: { id: string; type: "query_token" | "code_token"; tokenIndex: number };
@@ -91,6 +92,10 @@ export async function applyDragRerank(payload: {
   status: "ok";
   candidates: CandidateSummary[];
   generalizedMatchesByCandidate?: Record<string, unknown>;
+  localMatches?: {
+    tokenMatches: Array<Record<string, unknown>>;
+    lineMatches: Array<Record<string, unknown>>;
+  };
   diagnostic: Record<string, string | number>;
 }> {
   return fetchJson("/api/intervention/drag-rerank", {
@@ -100,11 +105,11 @@ export async function applyDragRerank(payload: {
   });
 }
 
-export async function resetInterventions(testId?: string): Promise<{ status: "ok"; clearedMemories: number }> {
+export async function resetInterventions(testId?: string, model = "xsearch"): Promise<{ status: "ok"; clearedMemories: number }> {
   return fetchJson("/api/intervention/reset", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ testId })
+    body: JSON.stringify({ testId, model })
   });
 }
 

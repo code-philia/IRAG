@@ -33,6 +33,17 @@ export type CandidateSummary = {
 
 export type SessionPayload = {
   testId: string;
+  model?: { id: string; name: string; type: string; description?: string };
+  capabilities?: {
+    concepts?: boolean;
+    hierarchy?: boolean;
+    token_similarity?: boolean;
+    projection?: boolean;
+    inspect?: boolean;
+    intervention?: boolean;
+    reranking_after_intervention?: boolean;
+    external_effects?: boolean;
+  };
   rankingSource?: string;
   conceptSource?: string;
   query: {
@@ -93,6 +104,8 @@ export type CandidateDetail = {
   metadata: Record<string, string>;
   rankingSource?: string;
   conceptSource?: string;
+  model?: SessionPayload["model"];
+  capabilities?: SessionPayload["capabilities"];
   generalizedRepresentationScore?: number;
   generalizationActive?: boolean;
   lineSimilarityTransitions?: Array<{

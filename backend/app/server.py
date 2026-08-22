@@ -22,6 +22,16 @@ from .log_service import append_event
 from .training_attribution_service import build_token_pair_attribution
 
 
+def _requested_model(data: dict | None = None, query: dict | None = None) -> str:
+    raw = (data or {}).get("model") or (query or {}).get("model", ["xsearch"])[0]
+    return str(raw or "xsearch").lower()
+
+
+def _generic_service():
+    from . import generic_dual_encoder_service
+    return generic_dual_encoder_service
+
+
 BOOTSTRAP_PREWARM_TEST_IDS = ("csn_11078", "csn_11087")
 
 
@@ -34,6 +44,19 @@ def _cached_initial_bootstrap(test_id: str, top_k: int) -> dict:
     candidate_id = str(first["id"])
     candidate = apply_adapter_to_candidate_payload(build_candidate_payload(test_id, candidate_id))
     graph = build_dynavis_graph(test_id, candidate_id, candidate=candidate)
+    return {"session": session, "candidate": candidate, "graph": graph}
+
+
+@lru_cache(maxsize=16)
+def _cached_generic_bootstrap(test_id: str, top_k: int) -> dict:
+    adapter = _generic_service()
+    session = adapter.build_session_payload(test_id, top_k)
+    first = next(iter(session.get("candidates") or []), None)
+    if not first:
+        raise ValueError("No CodeBERT candidates available for this test.")
+    candidate_id = str(first["id"])
+    candidate = adapter.build_candidate_payload(test_id, candidate_id)
+    graph = adapter.build_graph(test_id, candidate_id)
     return {"session": session, "candidate": candidate, "graph": graph}
 
 
@@ -85,18 +108,28 @@ class ApiHandler(BaseHTTPRequestHandler):
                                 "projectionMethod": "DynaVis",
                             }
                         ],
+                        "models": [
+                            {"id": "xsearch", "name": "XSearch", "type": "native", "capabilities": {"concepts": True, "hierarchy": True, "token_similarity": True, "projection": True, "inspect": True, "intervention": True, "reranking_after_intervention": True, "external_effects": True}},
+                            {"id": "codebert", "name": "CodeBERT", "type": "generic_dual_encoder", "capabilities": _generic_service().CAPABILITIES, "available": _generic_service().CODEBERT_BASE_PATH.exists() and _generic_service().CODEBERT_CHECKPOINT_PATH.exists()},
+                        ],
                         "tests": get_available_tests(),
                     }
                 )
             elif path.startswith("/api/candidates/"):
                 candidate_id = path.rsplit("/", 1)[-1]
                 test_id = query.get("test_id", [""])[0]
-                self._send_json(apply_adapter_to_candidate_payload(build_candidate_payload(test_id, candidate_id)))
+                if _requested_model(query=query) == "codebert":
+                    self._send_json(_generic_service().build_candidate_payload(test_id, candidate_id))
+                else:
+                    self._send_json(apply_adapter_to_candidate_payload(build_candidate_payload(test_id, candidate_id)))
             elif path == "/api/visualize/graph":
                 test_id = query.get("test_id", [""])[0]
                 candidate_id = query.get("candidate_id", [""])[0]
                 epoch = int(query.get("epoch", ["4"])[0])
-                self._send_json(build_dynavis_graph(test_id, candidate_id, epoch))
+                if _requested_model(query=query) == "codebert":
+                    self._send_json(_generic_service().build_graph(test_id, candidate_id))
+                else:
+                    self._send_json(build_dynavis_graph(test_id, candidate_id, epoch))
             else:
                 self._send_json({"error": f"Unknown endpoint: {path}"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -112,20 +145,36 @@ class ApiHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/session/load":
                 test_id = str(data.get("testId") or "")
                 top_k = int(data.get("topK") or 10)
-                self._send_json(apply_adapter_to_session_payload(build_session_payload(test_id, top_k)))
+                if _requested_model(data=data) == "codebert":
+                    self._send_json(_generic_service().build_session_payload(test_id, top_k))
+                else:
+                    self._send_json(apply_adapter_to_session_payload(build_session_payload(test_id, top_k)))
             elif parsed.path == "/api/session/bootstrap":
                 test_id = str(data.get("testId") or "")
                 top_k = int(data.get("topK") or 20)
-                reset_interventions({"testId": test_id})
-                self._send_json(_cached_initial_bootstrap(test_id, top_k))
+                if _requested_model(data=data) == "codebert":
+                    _generic_service().reset_local_interventions(test_id)
+                    _cached_generic_bootstrap.cache_clear()
+                    self._send_json(_cached_generic_bootstrap(test_id, top_k))
+                else:
+                    reset_interventions({"testId": test_id})
+                    self._send_json(_cached_initial_bootstrap(test_id, top_k))
             elif parsed.path == "/api/logs/events":
                 self._send_json(append_event(data))
             elif parsed.path == "/api/intervention/manual-link":
                 self._send_json(apply_manual_link(data))
             elif parsed.path == "/api/intervention/drag-rerank":
-                self._send_json(apply_drag_rerank(data))
+                if _requested_model(data=data) == "codebert":
+                    _cached_generic_bootstrap.cache_clear()
+                    self._send_json(_generic_service().apply_local_intervention(data))
+                else:
+                    self._send_json(apply_drag_rerank(data))
             elif parsed.path == "/api/intervention/reset":
-                self._send_json(reset_interventions(data))
+                if _requested_model(data=data) == "codebert":
+                    _cached_generic_bootstrap.cache_clear()
+                    self._send_json(_generic_service().reset_local_interventions(data.get("testId")))
+                else:
+                    self._send_json(reset_interventions(data))
             elif parsed.path == "/api/diagnostics/token-pair-attribution":
                 self._send_json(build_token_pair_attribution(data))
             elif parsed.path == "/api/diagnostics/token-pair-gradient-attribution":
