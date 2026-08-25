@@ -5,6 +5,25 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+
+
+def _load_local_env() -> None:
+    """Load local development secrets without adding a dotenv dependency."""
+    env_path = ROOT_DIR / ".env"
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_local_env()
 ASSETS_DIR = Path(os.environ.get("XSEARCH_ASSETS_DIR", ROOT_DIR / "assets"))
 XSEARCH_ROOT = Path(os.environ.get("XSEARCH_ROOT", ASSETS_DIR / "XSearch"))
 _configured_user_study_dir = Path(os.environ.get("XSEARCH_USER_STUDY_DATA_DIR", ASSETS_DIR / "user-study-data"))
@@ -30,6 +49,16 @@ SMOKE_CODEBASE_PATH = XSEARCH_ROOT / "training_lab/eval_results/python_coco_smok
 
 RUNS_DIR = ROOT_DIR / "data" / "dynavis_runs"
 LOG_DIR = ROOT_DIR / "data" / "logs"
+GENERATION_DIR = ROOT_DIR / "data" / "generation"
+GENERATION_RECORDS_DIR = GENERATION_DIR / "records"
+GENERATION_RESULTS_DIR = GENERATION_DIR / "results"
+GENERATION_PROVIDER = os.environ.get("GENERATION_PROVIDER", "openai_compatible")
+GENERATION_API_URL = os.environ.get("GENERATION_API_URL", "")
+GENERATION_API_KEY = os.environ.get("GENERATION_API_KEY", "")
+GENERATION_MODEL = os.environ.get("GENERATION_MODEL", "")
+GENERATION_TEMPERATURE = float(os.environ.get("GENERATION_TEMPERATURE", "0"))
+GENERATION_MAX_TOKENS = int(os.environ.get("GENERATION_MAX_TOKENS", "1024"))
+GENERATION_EXECUTION_ENABLED = os.environ.get("GENERATION_EXECUTION_ENABLED", "0").lower() in {"1", "true", "yes"}
 ALIGNED_XSEARCH_DIR = ROOT_DIR / "data" / "aligned_xsearch"
 ATTRIBUTION_DIR = ROOT_DIR / "data" / "attribution"
 TRAINING_EVIDENCE_CACHE_PATH = ATTRIBUTION_DIR / "training_evidence_cache_full_v2.json"
@@ -40,6 +69,9 @@ CSN_PYTHON_TEST_PATH = XSEARCH_ROOT / "preprocess_dataset/csn_data/python_test.j
 CSN_PYTHON_CODEBASE_PATH = XSEARCH_ROOT / "preprocess_dataset/csn_data/python_codebase.jsonl"
 USER_STUDY_STEP7000_RANKING_PATH = ALIGNED_XSEARCH_DIR / "user_study_step7000_rankings.json"
 FULL_EVAL_STEP7000_RANKING_PATH = ALIGNED_XSEARCH_DIR / "full_eval_step7000_rankings.json"
+CSN_URL_MAPPED_API_DEMO_RANKINGS_PATH = ALIGNED_XSEARCH_DIR / "url_mapped_api_demo_rankings.json"
+API_BRIDGE_STEP7000_PACKED_PATH = ALIGNED_XSEARCH_DIR / "api_bridge_step7000_packed.pt"
+CSN_API_BRIDGE_PREFIX_CACHE_PATH = ALIGNED_XSEARCH_DIR / "api_bridge_gt_prefix_cache.pt"
 USER_STUDY_STEP7000_CODE_CACHE_PATH = ALIGNED_XSEARCH_DIR / "user_study_step7000_code_topk_cache.pt"
 USER_STUDY_STEP7000_BLOCK_CACHE_PATH = ALIGNED_XSEARCH_DIR / "user_study_step7000_block_cache.pt"
 CSN_FULL_STEP7000_CODE_CACHE_PATH = Path(

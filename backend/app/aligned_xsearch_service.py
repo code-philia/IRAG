@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 from sklearn.cluster import AgglomerativeClustering
 
-from .config import CONCEPT_COLORS, LATEST_STEP_CHECKPOINT_PATH, LOCAL_COCOSODA_PATH, TRAINING_EVAL_RESULTS_DIR, XSEARCH_ROOT
+from .config import API_BRIDGE_STEP7000_PACKED_PATH, CONCEPT_COLORS, LATEST_STEP_CHECKPOINT_PATH, LOCAL_COCOSODA_PATH, TRAINING_EVAL_RESULTS_DIR, XSEARCH_ROOT
 from .data_service import build_code_lines, load_smoke_codebase, token_text
 
 
@@ -58,6 +58,14 @@ def packed_step7000():
     hidden, scores, urls = torch.load(PACKED_STEP7000, map_location="cpu", mmap=True)
     url_index = {str(url): idx for idx, url in enumerate(urls)}
     return hidden, scores, urls, url_index
+
+
+@lru_cache(maxsize=1)
+def api_bridge_packed_step7000():
+    if not API_BRIDGE_STEP7000_PACKED_PATH.exists():
+        return None
+    hidden, scores, urls = torch.load(API_BRIDGE_STEP7000_PACKED_PATH, map_location="cpu", mmap=True)
+    return hidden, scores, urls, {str(url): idx for idx, url in enumerate(urls)}
 
 
 def _query_text(row: dict[str, Any]) -> str:
@@ -155,10 +163,17 @@ def get_aligned_query_vectors(test_id: str) -> tuple[list[str], np.ndarray] | No
 
 def _code_vectors_for_url(url: str):
     hidden, scores, _urls, url_index = packed_step7000()
-    if url not in url_index:
+    if url in url_index:
+        row = int(url_index[url])
+        return hidden[row].detach().cpu().float(), scores[row].detach().cpu().float()
+    api_bridge_pack = api_bridge_packed_step7000()
+    if api_bridge_pack is None:
         return None
-    row = int(url_index[url])
-    return hidden[row].detach().cpu().float(), scores[row].detach().cpu().float()
+    bridge_hidden, bridge_scores, _bridge_urls, bridge_index = api_bridge_pack
+    if url not in bridge_index:
+        return None
+    row = int(bridge_index[url])
+    return bridge_hidden[row].detach().cpu().float(), bridge_scores[row].detach().cpu().float()
 
 
 def _line_centroids(row: dict[str, Any], hidden: torch.Tensor, scores: torch.Tensor):

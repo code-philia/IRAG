@@ -1,11 +1,14 @@
 import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowDown, ArrowLeftRight, ArrowUp, CirclePlay, Link2, Loader2, Maximize2, Move, RefreshCw, ZoomIn, ZoomOut } from "lucide-react";
-import { applyDragRerank, createManualLink, getExperiments, loadCandidate, loadGraph, loadSession, loadSessionBootstrap, loadTokenPairAttribution, logEvent, resetInterventions, runGradientAttribution } from "./api";
+import { ArrowDown, ArrowLeftRight, ArrowUp, CirclePlay, Loader2, Maximize2, Move, RefreshCw, ZoomIn, ZoomOut } from "lucide-react";
+import { applyDragRerank, confirmReference, createManualLink, evaluateGeneration, generateCode, getExperiments, loadCandidate, loadGraph, loadSession, loadSessionBootstrap, loadTokenPairAttribution, logEvent, resetInterventions, runGradientAttribution } from "./api";
 import type {
   CandidateDetail,
   CandidateSummary,
   Concept,
+  GenerationConfirmation,
+  GenerationEvaluation,
+  GenerationResult,
   GradientAttribution,
   GraphNode,
   ManualLink,
@@ -16,7 +19,8 @@ import type {
 import "./styles.css";
 
 const DEFAULT_TEST_ID = "";
-const FOCUS_TEST_IDS = [DEFAULT_TEST_ID, "48", "1556", "1642", "2695", "3856", "954", "csn_9848", "csn_11087", "csn_11078", "csn_9406", "csn_400", "csn_13958", "csn_13527"];
+const FOCUS_TEST_IDS = [DEFAULT_TEST_ID, "48", "1556", "1642", "2695", "3856", "954", "csn_9848", "csn_11087", "csn_11078", "csn_9406", "csn_400", "csn_13958", "csn_13527", "csn_8838", "csn_2812", "csn_7727", "csn_4772", "csn_10023", "csn_2207", "csn_5340", "csn_10164", "csn_13655", "csn_14175", "csn_10643", "csn_12075"];
+const GENERATION_CASE_IDS = new Set(["csn_8838"]);
 const GRAPH_WIDTH = 880;
 const GRAPH_HEIGHT = 560;
 const SUPPORT_QUERY_EVIDENCE_THRESHOLD = 0.55;
@@ -45,6 +49,10 @@ function tokenFamilyKey(token: string) {
   if (key.endsWith("ies") && key.length > 4) return `${key.slice(0, -3)}y`;
   if (key.endsWith("s") && key.length > 4) return key.slice(0, -1);
   return key;
+}
+
+function repeatedCodeTokenKey(token: string) {
+  return displayToken(token).trim().toLowerCase();
 }
 
 function isPunctuationToken(token: string | number | null | undefined) {
@@ -1688,7 +1696,14 @@ function CodeViewer({
   const allHierarchyLines = useMemo(() => Object.values(graph?.hierarchy?.linesByBlock ?? {}).flat().map((line) => ({ ...line, id: `line_${line.lineNumber}` })), [graph?.hierarchy?.linesByBlock]);
   const recommendedTokenIndices = useMemo(() => new Set(graph?.hierarchy?.recommendedTokenIndices ?? []), [graph?.hierarchy?.recommendedTokenIndices]);
   const conceptById = useMemo(() => new Map(conceptList.map((concept) => [concept.conceptId, concept])), [conceptList]);
-  const lineWinners = useMemo(() => conceptWinnerMap(allHierarchyLines, conceptList), [allHierarchyLines, conceptList]);
+  const selectedBlockHierarchyLines = useMemo(() => {
+    if (!selectedBlockId) return [];
+    return (graph?.hierarchy?.linesByBlock?.[selectedBlockId] ?? []).map((line) => ({ ...line, id: `line_${line.lineNumber}` }));
+  }, [graph?.hierarchy?.linesByBlock, selectedBlockId]);
+  const selectedBlockLineWinners = useMemo(
+    () => conceptWinnerMap(selectedBlockHierarchyLines, conceptList),
+    [selectedBlockHierarchyLines, conceptList]
+  );
   const blockByLine = useMemo(() => {
     const map = new Map<number, NonNullable<VisualizationGraph["hierarchy"]>["blocks"][number]>();
     hierarchyBlocks.forEach((block) => block.lineNumbers.forEach((lineNumber) => map.set(lineNumber, block)));
@@ -1736,8 +1751,16 @@ function CodeViewer({
             });
             const block = blockByLine.get(line.lineNumber);
             const blockMatches = block ? blockWinners.get(block.id) ?? [] : [];
-            const lineMatches = lineWinners.get(`line_${line.lineNumber}`) ?? [];
-            const hierarchyMatches = canvasLevel === "block" ? blockMatches : canvasLevel === "line" ? lineMatches : [];
+            const lineMatches = selectedBlockLineWinners.get(`line_${line.lineNumber}`) ?? [];
+            const isHierarchyDetail = canvasLevel === "line" || canvasLevel === "line_tokens";
+            const belongsToSelectedBlock = Boolean(selectedBlockId && block?.id === selectedBlockId);
+            // The code viewer uses the same concept winner map as the hierarchy
+            // canvas, so line backgrounds and line-node colors always agree.
+            const hierarchyMatches = canvasLevel === "block"
+              ? blockMatches
+              : isHierarchyDetail && belongsToSelectedBlock
+                ? lineMatches
+                : [];
             const hierarchyLine = allHierarchyLines.find((item) => item.lineNumber === line.lineNumber);
             const blockSignals = block && Array.isArray(block.signals) ? block.signals : [];
             const blockLineSignals = block
@@ -1753,10 +1776,16 @@ function CodeViewer({
                 : [];
             const hierarchyColors = hierarchyMatches.map((match) => match.concept.color);
             const blockSelected = canvasLevel === "block" && block?.id === selectedBlockId;
-            const conceptSelected = canvasLevel === "token" || canvasLevel === "line_tokens" ? tokenConceptSelected : hierarchyMatches.some((match) => selectedConceptSet.has(match.concept.conceptId));
+            const conceptSelected = canvasLevel === "token" || canvasLevel === "line_tokens"
+              ? tokenConceptSelected || hierarchyMatches.some((match) => selectedConceptSet.has(match.concept.conceptId))
+              : hierarchyMatches.some((match) => selectedConceptSet.has(match.concept.conceptId));
             const blockStart = block?.lineNumbers[0] === line.lineNumber;
             const blockEnd = block?.lineNumbers[block.lineNumbers.length - 1] === line.lineNumber;
-            const levelActive = canvasLevel === "block" ? blockSelected || blockMatches.length > 0 : canvasLevel === "line" ? lineSelected || lineMatches.length > 0 : lineSelected || conceptSelected;
+            const levelActive = canvasLevel === "block"
+              ? blockSelected || blockMatches.length > 0
+              : isHierarchyDetail
+                ? belongsToSelectedBlock && (lineSelected || hierarchyMatches.length > 0 || conceptSelected)
+                : lineSelected || conceptSelected;
             const indent = line.text.match(/^\s*/)?.[0] ?? "";
             const displayedLineNumber = displayLineNumberByRaw.get(line.lineNumber) ?? line.lineNumber;
             return (
@@ -1768,7 +1797,7 @@ function CodeViewer({
                   </div>
                 ) : null}
                 <div
-                  className={`${levelActive ? "code-line active" : "code-line"}${canvasLevel === "block" ? " block-line" : ""}${blockStart ? " block-start" : ""}${blockEnd ? " block-end" : ""}${blockSelected ? " block-selected" : ""}`}
+                  className={`${levelActive ? "code-line active" : "code-line"}${canvasLevel === "block" ? " block-line" : ""}${isHierarchyDetail && belongsToSelectedBlock ? " hierarchy-detail-line" : ""}${isHierarchyDetail && selectedBlockId && !belongsToSelectedBlock ? " hierarchy-outside-scope" : ""}${blockStart ? " block-start" : ""}${blockEnd ? " block-end" : ""}${blockSelected ? " block-selected" : ""}`}
                   style={hierarchyColors.length ? {
                     borderLeftColor: hierarchyColors[0],
                     background: hierarchyColors.length === 1
@@ -1785,6 +1814,12 @@ function CodeViewer({
                     const manual = manualByCodeToken.get(idx);
                     const tokenId = `c_tok_${idx}`;
                     const showTokenHighlight = canvasLevel === "token" || canvasLevel === "line_tokens";
+                    const inheritLineColor = canvasLevel === "line_tokens" && lineSelected && hierarchyMatches.length > 0;
+                    const inheritedLineStyle = hierarchyColors.length === 1
+                      ? { background: `${hierarchyColors[0]}33`, borderColor: hierarchyColors[0] }
+                      : hierarchyColors.length > 1
+                        ? { borderColor: hierarchyColors[0], background: `linear-gradient(90deg, ${hierarchyColors.map((color) => `${color}33`).join(", ")})` }
+                        : undefined;
                     const recommended = recommendedTokenIndices.has(idx);
                     const inspectLabel = recommended ? `Inspect ${displayToken(candidate.codeTokens[idx])}` : undefined;
                     const selected = showTokenHighlight && (selectedTokenSet.has(tokenId) || concepts.some((concept) => selectedConceptSet.has(concept.conceptId)) || Boolean(manual));
@@ -1797,7 +1832,11 @@ function CodeViewer({
                         style={showTokenHighlight ? (
                           manual
                             ? { background: `${manual.color}22`, borderColor: manual.color, outlineColor: manual.color }
-                            : tokenColorStyle(concepts, selectedConceptSet, selectedLineSet.has(line.lineNumber))
+                            : inheritLineColor
+                              ? inheritedLineStyle
+                              : canvasLevel === "line_tokens"
+                                ? undefined
+                                : tokenColorStyle(concepts, selectedConceptSet, selectedLineSet.has(line.lineNumber))
                         ) : undefined}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -1886,24 +1925,31 @@ function VisualizationCanvas({
   const lineTokenIndices = canvasLevel === "line_tokens" && selectedBlock && selectedLineNumber != null
     ? new Set(tokenProps.graph?.hierarchy?.linesByBlock[selectedBlock.id]?.find((line) => line.lineNumber === selectedLineNumber)?.tokenIndices ?? [])
     : null;
+  const lineTokenColorOverrides = (() => {
+    if (canvasLevel !== "line_tokens" || !selectedBlock || selectedLineNumber == null || !tokenProps.session) return {};
+    const blockLines = (tokenProps.graph?.hierarchy?.linesByBlock[selectedBlock.id] ?? [])
+      .map((line) => ({ ...line, id: `line_${line.lineNumber}` }));
+    const selectedLine = blockLines.find((line) => line.lineNumber === selectedLineNumber);
+    const matches = selectedLine ? conceptWinnerMap(blockLines, tokenProps.session.query.concepts).get(selectedLine.id) ?? [] : [];
+    const colors = matches.map((match) => match.concept.color);
+    return Object.fromEntries((selectedLine?.tokenIndices ?? []).map((tokenIndex) => [`c_tok_${tokenIndex}`, colors]));
+  })();
   const recommendedTokenIndices = new Set(tokenProps.graph?.hierarchy?.recommendedTokenIndices ?? []);
   const dragLinkedTokenIndices = (() => {
     if (!tokenProps.graph) return new Set<number>();
-    const draggedSeeds = [...recommendedTokenIndices].filter((index) => {
-      const node = tokenProps.graph?.nodes.find((item) => item.id === `c_tok_${index}`);
-      const position = tokenProps.persistedPositions[`c_tok_${index}`];
-      return Boolean(node && position && Math.hypot(position.x - node.x, position.y - node.y) >= 2);
+    const draggedSeeds = tokenProps.graph.nodes.filter((node) => {
+      if (node.type !== "code_token") return false;
+      const position = tokenProps.persistedPositions[node.id];
+      return Boolean(position && Math.hypot(position.x - node.x, position.y - node.y) >= 2);
     });
     if (!draggedSeeds.length) return new Set<number>();
     const seedKeys = new Set(
       draggedSeeds
-        .map((index) => tokenProps.graph?.nodes.find((node) => node.id === `c_tok_${index}`))
-        .filter((node): node is GraphNode => Boolean(node))
-        .map((node) => tokenFamilyKey(node.label))
+        .map((node) => repeatedCodeTokenKey(node.label))
         .filter(Boolean)
     );
     return new Set(tokenProps.graph.nodes
-      .filter((node) => node.type === "code_token" && !recommendedTokenIndices.has(node.tokenIndex) && seedKeys.has(tokenFamilyKey(node.label)))
+      .filter((node) => node.type === "code_token" && !draggedSeeds.some((seed) => seed.id === node.id) && seedKeys.has(repeatedCodeTokenKey(node.label)))
       .map((node) => node.tokenIndex));
   })();
   const visibleNodeFilter = tokenProps.graph
@@ -1955,7 +2001,7 @@ function VisualizationCanvas({
         </span>
       </div>
       {canvasLevel === "line_tokens" && dragLinkedTokenIndices.size ? <div className="related-suggestion-notice">Related token suggestion</div> : null}
-      <TokenVisualizationCanvas {...tokenProps} visibleNodeFilter={visibleNodeFilter} canvasScope={canvasLevel === "line_tokens" ? "line" : "all"} queryPointMode={queryPointMode} onQueryConcept={onHierarchyConcept} showRecommendedTokens={showRecommendedTokens} linkedSuggestionTokenIndices={dragLinkedTokenIndices} />
+      <TokenVisualizationCanvas {...tokenProps} visibleNodeFilter={visibleNodeFilter} canvasScope={canvasLevel === "line_tokens" ? "line" : "all"} queryPointMode={queryPointMode} onQueryConcept={onHierarchyConcept} showRecommendedTokens={showRecommendedTokens} linkedSuggestionTokenIndices={dragLinkedTokenIndices} nodeColorOverrides={lineTokenColorOverrides} />
     </div>
   );
 }
@@ -1995,7 +2041,8 @@ function TokenVisualizationCanvas({
   queryPointMode = "tokens",
   onQueryConcept,
   showRecommendedTokens = false,
-  linkedSuggestionTokenIndices = new Set<number>()
+  linkedSuggestionTokenIndices = new Set<number>(),
+  nodeColorOverrides = {}
 }: {
   candidate: CandidateDetail | null;
   session: SessionPayload | null;
@@ -2032,6 +2079,7 @@ function TokenVisualizationCanvas({
   onQueryConcept?: (conceptId: number) => void;
   showRecommendedTokens?: boolean;
   linkedSuggestionTokenIndices?: Set<number>;
+  nodeColorOverrides?: Record<string, string[]>;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
@@ -2119,11 +2167,12 @@ function TokenVisualizationCanvas({
   }, [session]);
   const queryConceptMembersByTokenId = useMemo(() => {
     const membersByTokenId = new Map<string, string[]>();
+    if (queryPointMode !== "concept") return membersByTokenId;
     queryConceptTargetGroups.forEach((group) => {
       group.memberIds.forEach((memberId) => membersByTokenId.set(memberId, group.memberIds));
     });
     return membersByTokenId;
-  }, [queryConceptTargetGroups]);
+  }, [queryConceptTargetGroups, queryPointMode]);
   const recommendationByCodeToken = useMemo(() => {
     const curated = graph?.hierarchy?.recommendedTokens ?? [];
     const signals = [
@@ -2142,7 +2191,7 @@ function TokenVisualizationCanvas({
   const targetDisplayItems = useMemo(() => {
     const remaining = new Set(dragTargetIds);
     const items: Array<{ id: string; label: string; type: "query_token" | "code_token" }> = [];
-    queryConceptTargetGroups.forEach((conceptGroup) => {
+    if (queryPointMode === "concept") queryConceptTargetGroups.forEach((conceptGroup) => {
       const members = conceptGroup.memberIds;
       if (members.length && members.every((id) => remaining.has(id))) {
         members.forEach((id) => remaining.delete(id));
@@ -2154,7 +2203,7 @@ function TokenVisualizationCanvas({
       if (node) items.push({ id, label: node.label, type: node.type });
     });
     return items;
-  }, [dragTargetIds, queryConceptTargetGroups, nodeById]);
+  }, [dragTargetIds, queryConceptTargetGroups, nodeById, queryPointMode]);
   const focusId = selectedTokenIds[0] ?? null;
   const focusNode = focusId ? graph?.nodes.find((node) => node.id === focusId) ?? null : null;
   const neighborItems = useMemo(() => nearestNeighbors(graph, focusId, 5), [graph, focusId]);
@@ -2247,7 +2296,7 @@ function TokenVisualizationCanvas({
       const selected = (node: GraphNode) => selectedTokenSet.has(node.id) || selectedTargetSet.has(node.id);
       const suggested = (node: GraphNode) => showRecommendedTokens && canvasScope === "line" && node.type === "code_token" && recommendationTokenIndexSet.has(node.tokenIndex);
       const suggestedQuery = (node: GraphNode) => showRecommendedTokens && canvasScope === "line" && node.type === "query_token" && node.conceptIds.some((id) => recommendationConceptIdSet.has(id));
-      const dragLinkedSuggestion = (node: GraphNode) => dragMode && canvasScope === "line" && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
+      const dragLinkedSuggestion = (node: GraphNode) => (canvasScope === "line" || canvasScope === "all") && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
       const score = (node: GraphNode) => (
         selected(node) ? 1000
           : suggested(node) ? 950
@@ -2272,7 +2321,7 @@ function TokenVisualizationCanvas({
       const box = { x: point.x + (label ? width / 2 - radius : 0), y: point.y, width, height };
       const suggested = showRecommendedTokens && canvasScope === "line" && node.type === "code_token" && recommendationTokenIndexSet.has(node.tokenIndex);
       const suggestedQuery = showRecommendedTokens && canvasScope === "line" && node.type === "query_token" && node.conceptIds.some((id) => recommendationConceptIdSet.has(id));
-      const dragLinkedSuggestion = canvasScope === "line" && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
+      const dragLinkedSuggestion = (canvasScope === "line" || canvasScope === "all") && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
       const priorityNode = selectedTokenSet.has(node.id) || selectedTargetSet.has(node.id) || suggested || suggestedQuery || dragLinkedSuggestion;
       if (priorityNode || !occupied.some((item) => overlap(box, item))) {
         visible.add(node.id);
@@ -2411,7 +2460,7 @@ function TokenVisualizationCanvas({
     if (!dragTargetsConfirmed) {
       suppressClickRef.current = true;
       const conceptMembers = conceptDisplayMembers.get(node.id)
-        ?? (node.type === "query_token" ? queryConceptMembersByTokenId.get(node.id) : undefined);
+        ?? (queryPointMode === "concept" && node.type === "query_token" ? queryConceptMembersByTokenId.get(node.id) : undefined);
       if (conceptMembers) {
         const allSelected = conceptMembers.every((id) => dragTargetIds.includes(id));
         onDragTargetChange(allSelected
@@ -2506,14 +2555,6 @@ function TokenVisualizationCanvas({
           </div>
         )}
       </div>
-      {linkMode && (
-        <div className="canvas-tools">
-          <span className="tool-pill active">
-            <Link2 size={14} />
-            {linkDraft ? `Pick a ${linkDraft.type === "query_token" ? "code" : "query"} token` : "Pick query and code tokens"}
-          </span>
-        </div>
-      )}
       <svg
         ref={svgRef}
         className="graph"
@@ -2529,11 +2570,11 @@ function TokenVisualizationCanvas({
             <path d="M0,0 L7,3.5 L0,7 z" fill="#7c3aed" />
           </marker>
           {graph?.nodes.map((node) => {
-            const colors = nodeColors(node);
+            const colors = nodeColorOverrides[node.id]?.length ? nodeColorOverrides[node.id] : nodeColors(node);
             if (colors.length <= 1) return null;
             const step = 100 / colors.length;
             return (
-              <linearGradient key={`grad_${node.id}`} id={`node_grad_${node.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <linearGradient key={`grad_${node.id}`} id={`${nodeColorOverrides[node.id]?.length ? "line_node_grad" : "node_grad"}_${node.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
                 {colors.map((color, idx) => (
                   <React.Fragment key={`${node.id}_${color}_${idx}`}>
                     <stop offset={`${idx * step}%`} stopColor={color} />
@@ -2700,7 +2741,7 @@ function TokenVisualizationCanvas({
               const suggestion = showRecommendedTokens && canvasScope === "line" && (
                 (node.type === "code_token" && recommendationTokenIndexSet.has(node.tokenIndex)) ||
                 (node.type === "query_token" && node.conceptIds.some((id) => recommendationConceptIdSet.has(id))));
-              const linkedSuggestion = canvasScope === "line" && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
+              const linkedSuggestion = (canvasScope === "line" || canvasScope === "all") && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
               if (selectedTokenSet.has(node.id) || selectedTargetSet.has(node.id) || draggedTrailIds.has(node.id) || suggestion || linkedSuggestion) return 3;
               if (localFocusIds.has(node.id)) return 2;
               if (dragColorsByNode.has(node.id) || followerTrailIds.has(node.id) || externalImpactByNode.has(node.id)) return 1;
@@ -2725,7 +2766,7 @@ function TokenVisualizationCanvas({
           const externalImpactsForNode = externalImpactByNode.get(node.id) ?? [];
           const externallyImpacted = node.type === "code_token" && externalImpactsForNode.length > 0;
           const recommendedSuggestion = showRecommendedTokens && canvasScope === "line" && node.type === "code_token" && recommendationByCodeToken.has(node.tokenIndex);
-          const dragLinkedSuggestion = canvasScope === "line" && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
+          const dragLinkedSuggestion = (canvasScope === "line" || canvasScope === "all") && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
           const motionRelevant = draggedTrailIds.has(node.id) || followerTrailIds.has(node.id) || dragColorsByNode.has(node.id) || externallyImpacted;
           const dimmed = (hasFocus && !active && !motionRelevant) || lowPriority;
           const nodeOpacity = selectedDirectly || selectedTarget
@@ -2742,6 +2783,10 @@ function TokenVisualizationCanvas({
           const markerScale = selectedDirectly || selectedTarget ? 1.08 : localNeighbor ? 1.04 + zoomEmphasis * 0.12 : 1 + zoomEmphasis * 0.08;
           const queryRadius = (active ? 8 : 5) * markerScale;
           const codeRadius = (active ? 9 : 6) * markerScale;
+          const overrideColors = nodeColorOverrides[node.id];
+          const nodeFillColor = overrideColors?.length
+            ? overrideColors.length === 1 ? overrideColors[0] : `url(#line_node_grad_${node.id})`
+            : nodeFill(node, selectedConceptSet);
           return (
             <g
               key={node.id}
@@ -2788,14 +2833,14 @@ function TokenVisualizationCanvas({
                   cx={point.x}
                   cy={point.y}
                   r={queryRadius}
-                  fill={dragColorsByNode.has(node.id) ? dragColorsByNode.get(node.id)![0] : nodeFill(node, selectedConceptSet)}
+                  fill={dragColorsByNode.has(node.id) ? dragColorsByNode.get(node.id)![0] : nodeFillColor}
                   stroke="#17202a"
                   strokeWidth={selectedDirectly || selectedTarget ? 3.2 : active ? 2.5 : 1}
                 />
               ) : (
                 <polygon
                   points={`${point.x},${point.y - codeRadius} ${point.x - codeRadius},${point.y + codeRadius * 0.88} ${point.x + codeRadius},${point.y + codeRadius * 0.88}`}
-                  fill={dragColorsByNode.has(node.id) ? dragColorsByNode.get(node.id)![0] : nodeFill(node, selectedConceptSet)}
+                  fill={dragColorsByNode.has(node.id) ? dragColorsByNode.get(node.id)![0] : nodeFillColor}
                   stroke="#17202a"
                   strokeWidth={selectedDirectly || selectedTarget ? 3.2 : active ? 2.5 : 1}
                 />
@@ -2874,6 +2919,62 @@ function TokenVisualizationCanvas({
   );
 }
 
+function GenerationPanel({
+  confirmation,
+  result,
+  evaluation,
+  loading,
+  onGenerate,
+  onEvaluate,
+  onBack
+}: {
+  confirmation: GenerationConfirmation;
+  result: GenerationResult | null;
+  evaluation: GenerationEvaluation | null;
+  loading: boolean;
+  onGenerate: () => void;
+  onEvaluate: () => void;
+  onBack: () => void;
+}) {
+  const { task, selection } = confirmation;
+  return (
+    <section className="panel generation-panel">
+      <div className="generation-header">
+        <div>
+          <div className="panel-title">Generate From Selected Reference</div>
+          <p>{task.query}</p>
+        </div>
+        <button onClick={onBack}>Back to Retrieval</button>
+      </div>
+      <div className="generation-context">
+        <div className="panel-title">Selected Reference</div>
+        <div className="generation-context-meta">
+          <strong>{selection.candidate.metadata.funcName || selection.selectedCandidateId}</strong>
+          <span>Rank {selection.selectedRank ?? "-"} · score {selection.selectedScore?.toFixed(3) ?? "-"}</span>
+          <span>{selection.interactionUsed ? "interaction used" : "no interaction"}</span>
+        </div>
+        <details open>
+          <summary>View selected retrieved code</summary>
+          <pre className="generation-context-code">{selection.candidate.rawCode}</pre>
+        </details>
+      </div>
+      <div className="generation-actions">
+        <button className="primary" onClick={onGenerate} disabled={loading}>{loading ? <Loader2 size={16} className="spin" /> : <CirclePlay size={16} />} Generate Code</button>
+        {result ? <button onClick={onEvaluate} disabled={loading}>Run Hidden Tests</button> : null}
+      </div>
+      {result ? <div className="generation-output">
+        <div className="panel-title">Generated Code</div>
+        <div className="generation-result-meta">{result.model} · {result.promptVersion} · {result.generationTime.toFixed(2)}s</div>
+        <pre>{result.generatedCode}</pre>
+      </div> : null}
+      {evaluation ? <div className={`generation-evaluation ${evaluation.status}`}>
+        <div className="panel-title">Evaluation</div>
+        {evaluation.status === "ok" ? <strong>Tests Passed: {evaluation.testsPassed} / {evaluation.testsTotal} · Functional Correctness: {Math.round((evaluation.passRate ?? 0) * 100)}%</strong> : <span>{evaluation.message}</span>}
+      </div> : null}
+    </section>
+  );
+}
+
 function App() {
   const [tests, setTests] = useState<string[]>([]);
   const [testId, setTestId] = useState(DEFAULT_TEST_ID);
@@ -2929,6 +3030,12 @@ function App() {
   const [graphLoading, setGraphLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retrievalLocked, setRetrievalLocked] = useState(false);
+  const [generationMode, setGenerationMode] = useState(false);
+  const [generationConfirmation, setGenerationConfirmation] = useState<GenerationConfirmation | null>(null);
+  const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
+  const [generationEvaluation, setGenerationEvaluation] = useState<GenerationEvaluation | null>(null);
+  const [generationLoading, setGenerationLoading] = useState(false);
   const loadRequestRef = useRef(0);
 
   useEffect(() => {
@@ -3021,6 +3128,11 @@ function App() {
     setError(null);
     setCandidate(null);
     setGraph(null);
+    setRetrievalLocked(false);
+    setGenerationMode(false);
+    setGenerationConfirmation(null);
+    setGenerationResult(null);
+    setGenerationEvaluation(null);
     try {
       setLoadingStep(`Loading Rank 1 ${nextTestId}`);
       const bootstrap = await loadSessionBootstrap(nextTestId, modelId);
@@ -3075,7 +3187,7 @@ function App() {
   }
 
   async function selectCandidate(next: CandidateSummary) {
-    if (!session) return;
+    if (!session || retrievalLocked) return;
     const requestId = ++loadRequestRef.current;
     setLoading(true);
     setGraphLoading(false);
@@ -3324,7 +3436,7 @@ function App() {
   }
 
   function toggleDragMode() {
-    if (session?.capabilities?.intervention === false) return;
+    if (retrievalLocked || session?.capabilities?.intervention === false) return;
     setDragMode((current) => {
       const next = !current;
       if (next && candidate) {
@@ -3412,7 +3524,7 @@ function App() {
   }
 
   async function handleGraphDrop(payload: { node: GraphNode; updates: Array<{ nodeId: string; similarity: number }>; positions: Record<string, { x: number; y: number }> }) {
-    if (session?.capabilities?.intervention === false) return;
+    if (retrievalLocked || session?.capabilities?.intervention === false) return;
     if (!session || !candidate) return;
     if (!graph) return;
     const targetIds = dragTargetsByCandidate[candidate.id] ?? [];
@@ -3483,7 +3595,73 @@ function App() {
   const currentDragTargetsConfirmed = candidate ? dragTargetsConfirmedByCandidate[candidate.id] ?? false : false;
   const currentExternalImpacts = candidate ? externalImpactsByCandidate[candidate.id] ?? [] : [];
   const supportsIntervention = session?.capabilities?.intervention !== false;
-  const supportsManualLink = modelId === "xsearch";
+
+  async function confirmReferenceForGeneration() {
+    if (!session || !candidate) return;
+    setGenerationLoading(true);
+    setError(null);
+    try {
+      const summary = candidates.find((item) => item.id === candidate.id);
+      const interactionUsed = Object.keys(dragPositionsByCandidate).some((candidateId) => Object.keys(dragPositionsByCandidate[candidateId]).length > 0)
+        || Object.keys(dragMatchesByCandidate).length > 0;
+      const confirmation = await confirmReference({
+        caseId: session.testId,
+        selectedCandidateId: candidate.id,
+        selectedRank: summary?.rank ?? null,
+        selectedScore: summary?.similarity ?? candidate.similarity,
+        interactionUsed,
+        model: modelId
+      });
+      setGenerationConfirmation(confirmation);
+      setRetrievalLocked(true);
+      setGenerationResult(null);
+      setGenerationEvaluation(null);
+      setGenerationMode(true);
+      setDragMode(false);
+      setLinkMode(false);
+      setAdjudicationMode(false);
+      logEvent("reference_confirmed_for_generation", { testId: session.testId, candidateId: candidate.id, selectedRank: summary?.rank, interactionUsed });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerationLoading(false);
+    }
+  }
+
+  async function runGeneration() {
+    if (!generationConfirmation) return;
+    setGenerationLoading(true);
+    setError(null);
+    setGenerationEvaluation(null);
+    try {
+      const result = await generateCode({
+        caseId: generationConfirmation.task.caseId,
+        selectionId: generationConfirmation.selectionId,
+        condition: "interactive_rag"
+      });
+      setGenerationResult(result);
+      logEvent("generation_complete", { caseId: result.caseId, condition: result.condition, contextCandidateId: result.contextCandidateId, generationId: result.generationId });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerationLoading(false);
+    }
+  }
+
+  async function runGenerationEvaluation() {
+    if (!generationResult) return;
+    setGenerationLoading(true);
+    setError(null);
+    try {
+      const result = await evaluateGeneration(generationResult.generationId);
+      setGenerationEvaluation(result);
+      logEvent("generation_evaluation", { generationId: generationResult.generationId, status: result.status, passRate: result.passRate });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerationLoading(false);
+    }
+  }
 
   function changeModel(nextModelId: string) {
     if (nextModelId === modelId) return;
@@ -3496,6 +3674,11 @@ function App() {
     setDragMode(false);
     setLinkMode(false);
     setAdjudicationMode(false);
+    setRetrievalLocked(false);
+    setGenerationMode(false);
+    setGenerationConfirmation(null);
+    setGenerationResult(null);
+    setGenerationEvaluation(null);
     setError(null);
     if (nextModelId === "codebert" && !testId.startsWith("csn_")) setTestId("csn_11087");
   }
@@ -3694,7 +3877,7 @@ function App() {
             <option value="">Select an example</option>
             {tests.map((id) => (
               <option key={id} value={id}>
-              {id === "48" ? "48 · allowed extension alignment" : id === "1556" ? "1556 · reset system state" : id === "1642" ? "1642 · compact rerank demo" : id === "2695" ? "2695 · EM iteration" : id === "2797" ? "2797 · command-line argument recovery" : id === "2836" ? "2836 · parent override logging recovery" : id === "3856" ? "3856 · comparable dictionary" : id === "954" ? "954 · API decorator specificity" : id === "csn_9848" ? "9848 · configuration return type" : id === "csn_11087" ? "11087 · right-click position" : id === "csn_11078" ? "11078 · error message display" : id === "csn_9406" ? "9406 · device buffer write" : id === "csn_400" ? "400 · parse options and commands" : id === "csn_13958" ? "13958 · line-pair diagnosis" : id === "csn_13527" ? "13527 · command-line logging" : `test ${id}`}
+              {id === "48" ? "48 · allowed extension alignment" : id === "1556" ? "1556 · reset system state" : id === "1642" ? "1642 · compact rerank demo" : id === "2695" ? "2695 · EM iteration" : id === "2797" ? "2797 · command-line argument recovery" : id === "2836" ? "2836 · parent override logging recovery" : id === "3856" ? "3856 · comparable dictionary" : id === "954" ? "954 · API decorator specificity" : id === "csn_9848" ? "9848 · configuration return type" : id === "csn_11087" ? "11087 · right-click position" : id === "csn_11078" ? "11078 · error message display" : id === "csn_9406" ? "9406 · device buffer write" : id === "csn_400" ? "400 · parse options and commands" : id === "csn_13958" ? "13958 · line-pair diagnosis" : id === "csn_13527" ? "13527 · command-line logging" : id === "csn_8838" ? "8838 · interned keyword API bridge" : id === "csn_2812" ? "2812 · qubit dimension log2 bridge" : id === "csn_7727" ? "7727 · Stokes calibration feed-type bridge" : id === "csn_4772" ? "4772 · KMIP DeviceCredential serialization bridge" : id === "csn_10023" ? "10023 · OSM replication state bridge" : id === "csn_2207" ? "2207 · window sum-square hop-length bridge" : id === "csn_5340" ? "5340 · GeoTiff VLR API bridge" : id === "csn_10164" ? "10164 · V4 meter request bridge" : id === "csn_13655" ? "13655 · application logging bridge" : id === "csn_14175" ? "14175 · notebook format bridge" : id === "csn_10643" ? "10643 · root logger bridge" : id === "csn_12075" ? "12075 · current tags API bridge" : `test ${id}`}
               </option>
             ))}
           </select>
@@ -3715,7 +3898,7 @@ function App() {
           <button
             className={dragMode ? "active-tool" : ""}
             onClick={toggleDragMode}
-            disabled={!graph || !supportsIntervention}
+            disabled={!graph || !supportsIntervention || retrievalLocked}
             title={supportsIntervention ? "启用或关闭画布节点拖拽" : "Interactive representation editing is currently available for XSearch."}
           >
             <Move size={16} />
@@ -3724,15 +3907,20 @@ function App() {
           <button
             className={adjudicationMode ? "active-tool" : ""}
             onClick={toggleAdjudicationMode}
-            disabled={!session}
+            disabled={!session || retrievalLocked}
             title="进入或退出两个候选的行级裁决对比"
           >
             <ArrowLeftRight size={16} />
             Adjudicate
           </button>
-          <button className={linkMode ? "active-tool" : ""} onClick={() => { setLinkMode((value) => !value); setDragMode(false); setLinkDraft(null); }} disabled={!graph || !supportsManualLink} title={supportsManualLink ? "Create a manual query-code relation" : "Manual links are currently available for XSearch."}>
-            <Link2 size={16} />
-            Link
+          <button
+            className={generationMode ? "active-tool" : ""}
+            onClick={generationMode ? () => setGenerationMode(false) : confirmReferenceForGeneration}
+            disabled={generationLoading || (!generationMode && (!session || !candidate || modelId !== "xsearch" || !session.referenceSelection?.enabled || !GENERATION_CASE_IDS.has(session.testId)))}
+            title={generationMode ? "Return to the locked retrieval workspace" : modelId !== "xsearch" ? "Generation validation currently uses locked XSearch reference evidence." : "Lock the selected reference before generation"}
+          >
+            <CirclePlay size={16} />
+            {generationMode ? "Retrieval" : "Use as Reference"}
           </button>
         </div>
       </header>
@@ -3756,6 +3944,18 @@ function App() {
           onExternalImpact={selectExternalImpact}
         />
         <div className={adjudicationMode ? "main-workspace adjudicating" : "main-workspace"}>
+          {generationMode && generationConfirmation ? (
+            <GenerationPanel
+              confirmation={generationConfirmation}
+              result={generationResult}
+              evaluation={generationEvaluation}
+              loading={generationLoading}
+              onGenerate={runGeneration}
+              onEvaluate={runGenerationEvaluation}
+              onBack={() => setGenerationMode(false)}
+            />
+          ) : (
+          <>
           {adjudicationMode && session ? (
             <div className="adjudication-workspace">
               <CandidatePanel
@@ -3888,6 +4088,8 @@ function App() {
             onAdjudicationToggle={toggleAdjudicationCandidate}
           />
           </>}
+          </>
+          )}
         </div>
       </div>
     </div>

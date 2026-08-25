@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from .config import ROOT_DIR, TRAINING_EVAL_RESULTS_DIR
+from .config import API_BRIDGE_STEP7000_PACKED_PATH, ROOT_DIR, TRAINING_EVAL_RESULTS_DIR
 
 
 PACKED_PREFIX = "python_full"
@@ -82,7 +82,28 @@ def get_packed_timeline(url: str, requested_code_tokens: int) -> PackedTimeline 
 
     url_index = load_url_index()
     if url not in url_index:
-        return None
+        if not API_BRIDGE_STEP7000_PACKED_PATH.exists():
+            return None
+        hidden, _mask, urls = _torch_load(API_BRIDGE_STEP7000_PACKED_PATH)
+        bridge_index = {str(item): idx for idx, item in enumerate(urls)}
+        if url not in bridge_index:
+            return None
+        token_count = max(0, min(int(requested_code_tokens), 64 - CODE_TOKEN_SLOT_OFFSET))
+        if token_count == 0:
+            return None
+        sample = hidden[bridge_index[url], CODE_TOKEN_SLOT_OFFSET : CODE_TOKEN_SLOT_OFFSET + token_count].detach().cpu()
+        vectors = sample.numpy().astype(np.float32, copy=True)
+        return PackedTimeline(
+            source="api_bridge_step7000_subset_cache",
+            kind="last_layer_code_token_hidden",
+            epochs=[1, 2, 3, 4],
+            code_vectors_by_epoch=[vectors, vectors.copy(), vectors.copy(), vectors.copy()],
+            code_token_count=token_count,
+            hidden_dim=int(vectors.shape[1]),
+            url=url,
+            url_index=int(bridge_index[url]),
+            token_slot_offset=CODE_TOKEN_SLOT_OFFSET,
+        )
 
     row_index = url_index[url]
     token_count = max(0, min(int(requested_code_tokens), 64 - CODE_TOKEN_SLOT_OFFSET))

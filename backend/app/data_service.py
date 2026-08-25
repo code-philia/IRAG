@@ -12,6 +12,7 @@ from .config import (
     CSN_GT_PREFIX_CACHE_PATH,
     CSN_PYTHON_CODEBASE_PATH,
     CSN_PYTHON_TEST_PATH,
+    CSN_URL_MAPPED_API_DEMO_RANKINGS_PATH,
     DEFAULT_DATASET_PATH,
     DEFAULT_MATCH_PATH,
     FULL_EVAL_STEP7000_RANKING_PATH,
@@ -505,6 +506,171 @@ CSN_RERANK_DEMO_CONFIG: dict[str, dict[str, Any]] = {
         "codeTokenIndex": 1,
         "instruction": "只操作 Rank1 CoverageData.line_data。选中 query 的 pairs，把 Rank1 的 line_data 拖远：它返回单个 line numbers，而不是 line-number pairs。GT arc_data 才对应 coverage arcs；本例适合测试负向诊断，不承诺 GT 会因一次泛化进入 Rank1。",
     },
+    "csn_8838": {
+        "label": "Interned Keyword API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 56,
+        "queryIndex": 8838,
+        "groundTruthCodeIdx": 19602,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 32299}",
+        "queryTokenIndices": [11],
+        "codeTokenIndex": 16,
+        "instruction": "检查 Rank1 keyword 的 kw_cache 路径；它处理 public keyword 创建，但 GT __get_or_create 同时完成私有缓存交换与 interned keyword 获取。共享 API 线索是低频 kw_cache，而不是词面重合。",
+    },
+    "csn_2812": {
+        "label": "Qubit Dimension Log2 API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 40,
+        "queryIndex": 2812,
+        "groundTruthCodeIdx": 3529,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 9656}",
+        "queryTokenIndices": [6, 7, 8, 9],
+        "codeTokenIndex": 33,
+        "instruction": "检查 Rank1 _check_nqubit_dim 中的 np.log2(input_dim)：它验证 n-qubit channel 的维度，但 GT BaseOperator._automatic_dims 才把维度转换为 qubit subsystem 元组。关键关系是 2^n 维 Hilbert space 与 n 个 qubit 的对应，而不是词面重合。",
+    },
+    "csn_7727": {
+        "label": "Stokes Calibration Feed-Type API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 104,
+        "queryIndex": 7727,
+        "groundTruthCodeIdx": 36257,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 42680}",
+        "queryTokenIndices": [1, 2, 3, 4, 5, 6, 7],
+        "codeTokenIndex": 15,
+        "instruction": "检查 Rank1 calibrate_pols 中的 feedtype：线性或圆形馈源基决定 Stokes 分量如何由 differential gain/phase 校正。Rank1 是写文件的完整 pipeline，GT apply_Mueller 才实现核心校正矩阵；feedtype 是连接两者的非词面领域线索。",
+    },
+    "csn_4772": {
+        "label": "KMIP DeviceCredential Serialization Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 49,
+        "queryIndex": 4772,
+        "groundTruthCodeIdx": 16717,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 16157}",
+        "queryTokenIndices": [2, 3, 4, 5, 6, 7],
+        "codeTokenIndex": 11,
+        "instruction": "检查 Rank1 Credential.write 中的 KMIPVersion：它只序列化泛化 Credential 容器；GT DeviceCredential.write 用同一 KMIP 协议版本和 BytearrayStream，逐项写入 device serial number、password 等设备凭据字段。把 KMIPVersion 拉向 data encoding DeviceCredential struct concept，再比较两者写入的具体字段。",
+    },
+    "csn_10023": {
+        "label": "OSM Replication State API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 48,
+        "queryIndex": 10023,
+        "groundTruthCodeIdx": 33502,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 1960}",
+        "queryTokenIndices": [1, 3, 4, 5, 6],
+        "codeTokenIndex": 19,
+        "instruction": "检查 Rank1 iter_changeset_stream 中的 state_dir：它保存 changeset stream 的读取状态；GT iter_osm_stream 用同一 replication-state 机制持续消费 OSM diff。Rank1 解析的是 changeset .osm.gz，GT 才处理 query 指向的 diff .osc.gz。",
+    },
+    "csn_2207": {
+        "label": "Window Sum-Square Hop-Length API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 129,
+        "queryIndex": 2207,
+        "groundTruthCodeIdx": 21455,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 35623}",
+        "queryTokenIndices": [3, 4, 5, 6, 7],
+        "codeTokenIndex": 7,
+        "instruction": "检查 Rank1 window_sumsquare 的 hop_length：它决定相邻 analysis frame 的步进；GT __window_ss_fill 正是用 sample = i * hop_length 将平方 window 累加到输出 envelope 的 helper。Rank1 是完整 wrapper，GT 才实现 query 指向的核心计算。",
+    },
+    "csn_4694": {
+        "label": "SignatureVerify Payload API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 24,
+        "queryIndex": 4694,
+        "groundTruthCodeIdx": 7396,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 38489}",
+        "queryTokenIndices": [8],
+        "codeTokenIndex": 26,
+        "instruction": "检查 Rank1 SignResponsePayload.write 的 _unique_identifier 字段；它写入的是 response payload，而 GT SignatureVerifyRequestPayload.write 才构造完整的验证请求 payload。共享线索是 KMIP 的 _unique_identifier，不是 query 的词面重复。",
+    },
+    "csn_6416": {
+        "label": "TransTmpl Structural Field API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 25,
+        "queryIndex": 6416,
+        "groundTruthCodeIdx": 17461,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 11571}",
+        "queryTokenIndices": [1],
+        "codeTokenIndex": 50,
+        "instruction": "检查 Rank1 walkFlattenFields 中 HStruct 的递归分支；它泛化遍历硬件结构值，而 GT TransTmpl.walkFlatten 才遍历指定 TransTmpl 实例的字段。HStruct 是需要领域理解的共享结构线索。",
+    },
+    "csn_4357": {
+        "label": "Incoming Connection Encryption API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 25,
+        "queryIndex": 4357,
+        "groundTruthCodeIdx": 11978,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 59}",
+        "queryTokenIndices": [9],
+        "codeTokenIndex": 16,
+        "instruction": "检查 Rank1 _onNewIncomingConnection 的 encryptor 初始化；它只准备连接与回调，GT _onIncomingMessageReceived 才处理初始消息、加密、utility message 和节点关联。",
+    },
+    "csn_5340": {
+        "label": "GeoTiff VLR Struct API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 36,
+        "queryIndex": 5340,
+        "groundTruthCodeIdx": 5711,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 26999}",
+        "queryTokenIndices": [0],
+        "codeTokenIndex": 21,
+        "instruction": "检查 Rank1 的 GeoKeyDirectoryVlr 解析分支；GT parse_geo_tiff 同样通过 GeoTiff VLR API 组织结构化结果，但覆盖更完整的 VLR 组合。",
+    },
+    "csn_10164": {
+        "label": "V4 Meter Request API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 73,
+        "queryIndex": 10164,
+        "groundTruthCodeIdx": 39814,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 39435}",
+        "queryTokenIndices": [0],
+        "codeTokenIndex": 1,
+        "instruction": "检查 Rank1 V4Meter.requestB 的 requestB 调用；GT V4Meter.request 通过同一仪表请求接口组合 A/B 读数，适合诊断组合读数语义是否被充分编码。",
+    },
+    "csn_13655": {
+        "label": "Application Logging API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 22,
+        "queryIndex": 13655,
+        "groundTruthCodeIdx": 23652,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 36880}",
+        "queryTokenIndices": [1],
+        "codeTokenIndex": 11,
+        "instruction": "检查 Rank1 _setup_log 的 StreamHandler 默认配置；GT Application._log_default 使用同一 logging API，但更完整地落实 application-level 默认日志行为。",
+    },
+    "csn_14175": {
+        "label": "Notebook Format API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 33,
+        "queryIndex": 14175,
+        "groundTruthCodeIdx": 30426,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 32305}",
+        "queryTokenIndices": [41],
+        "codeTokenIndex": 61,
+        "instruction": "检查 Rank1 reads_py 的 NBFormatError 格式处理；GT reads 使用同一异常/API 线索，并处理任意 notebook 版本后返回当前格式。",
+    },
+    "csn_10643": {
+        "label": "Root Logger Configuration Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 65,
+        "queryIndex": 10643,
+        "groundTruthCodeIdx": 17733,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 24488}",
+        "queryTokenIndices": [1],
+        "codeTokenIndex": 24,
+        "instruction": "检查 Rank1 basicConfig 中 removeHandler 的 logger 重置；GT common_logger_config 同时覆盖 root 与 non-root logger 的共同配置。",
+    },
+    "csn_12075": {
+        "label": "Current Tags API Bridge Candidate",
+        "presetSource": "url_mapped_step7000_shared_api_bridge",
+        "originalStep7000Rank": 19,
+        "queryIndex": 12075,
+        "groundTruthCodeIdx": 28438,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 549}",
+        "queryTokenIndices": [3],
+        "codeTokenIndex": 17,
+        "instruction": "检查 Rank1 Labels.list 的 ApiUri / self._post 请求；GT Tags.list 使用相同 API 模式，并直接对应当前 tags 的检索语义。",
+    },
     "csn_12289": {
         "label": "Set Update Semantics Demo",
         "presetSource": "csn_python_full_step7000_set_operation_pair_verified",
@@ -549,6 +715,11 @@ CSN_DISPLAY_CONCEPT_OVERRIDES: dict[str, list[dict[str, Any]]] = {
         {"conceptId": 0, "tokenIndices": [2, 4, 5], "text": "displays error message"},
         {"conceptId": 1, "tokenIndices": [8, 9, 11], "text": "wrong value typed"},
     ],
+    "csn_8838": [
+        {"conceptId": 0, "tokenIndices": [8, 9, 11, 14], "text": "interned keyword instance"},
+        {"conceptId": 1, "tokenIndices": [17, 19], "text": "input string"},
+        {"conceptId": 2, "tokenIndices": [1], "text": "swap"},
+    ],
 }
 
 
@@ -578,6 +749,51 @@ def _use_custom_rerank_demo(test_id: str) -> bool:
 
 def is_csn_demo_test(test_id: str) -> bool:
     return str(test_id) in CSN_RERANK_DEMO_TOP_ITEMS
+
+
+# Every generation case uses the same single-reference protocol.  A case
+# registers its hidden evaluation target and its server-side target-reference
+# annotation here; neither is returned to the participant UI.
+SINGLE_REFERENCE_CASE_CONFIG: dict[str, dict[str, int]] = {
+    "csn_8838": {
+        "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 19602,
+        "targetReferenceCodeIdx": CSN_CODE_OFFSET + 32299,
+    },
+}
+
+
+def is_single_reference_case(test_id: str) -> bool:
+    return str(test_id) in SINGLE_REFERENCE_CASE_CONFIG
+
+
+def is_hidden_reference_candidate(test_id: str, candidate_id: str) -> bool:
+    config = SINGLE_REFERENCE_CASE_CONFIG.get(str(test_id))
+    return bool(config and str(candidate_id) == f"code_{int(config['hiddenGroundTruthCodeIdx'])}")
+
+
+def apply_single_reference_mode(session: dict[str, Any]) -> dict[str, Any]:
+    """Strip hidden evaluation target data from a participant-facing session."""
+    config = SINGLE_REFERENCE_CASE_CONFIG.get(str(session.get("testId") or ""))
+    if not config:
+        return session
+    hidden_id = f"code_{int(config['hiddenGroundTruthCodeIdx'])}"
+    candidates = [
+        {key: value for key, value in candidate.items() if key != "isGroundTruth"}
+        for candidate in session.get("candidates", [])
+        if str(candidate.get("id")) != hidden_id
+    ]
+    payload = {
+        key: value
+        for key, value in session.items()
+        if key not in {"groundTruth", "generalizationDemo", "generalizationActive"}
+    }
+    payload["candidates"] = candidates
+    hidden_details = dict(payload.get("generalizedMatchesByCandidate") or {})
+    hidden_details.pop(hidden_id, None)
+    if "generalizedMatchesByCandidate" in payload:
+        payload["generalizedMatchesByCandidate"] = hidden_details
+    payload["referenceSelection"] = {"enabled": True, "selectionLimit": 1}
+    return payload
 
 
 def is_csn_code_idx(code_idx: int) -> bool:
@@ -639,6 +855,28 @@ def load_csn_gt_prefix_rankings(path: str = str(CSN_GT_PREFIX_CACHE_PATH)) -> di
     return rankings
 
 
+def _load_url_mapped_api_demo_rankings() -> dict[str, list[dict[str, Any]]]:
+    """Load compact, URL-mapped Top-20 rankings for API-bridge demos."""
+    if not CSN_URL_MAPPED_API_DEMO_RANKINGS_PATH.exists():
+        return {}
+    with open(CSN_URL_MAPPED_API_DEMO_RANKINGS_PATH, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return {
+        str(test_id): [
+            {
+                "codeIdx": int(item["codeIdx"]),
+                "score": float(item["score"]),
+                "rank": int(item["rank"]),
+            }
+            for item in items
+        ]
+        for test_id, items in payload.items()
+    }
+
+
+CSN_RERANK_DEMO_TOP_ITEMS.update(_load_url_mapped_api_demo_rankings())
+
+
 @lru_cache(maxsize=8)
 def load_matches(path: str = str(DEFAULT_MATCH_PATH)) -> dict[str, list[dict[str, Any]]]:
     with open(path, "r", encoding="utf-8") as f:
@@ -675,7 +913,7 @@ def _ranking_entry(test_id: str) -> dict[str, Any] | None:
         return {
             "testId": str(test_id),
             "gtCodeIdx": gt_idx,
-            "gtRank": int(gt_item["rank"]) if gt_item else 0,
+            "gtRank": int(gt_item["rank"]) if gt_item else int(config.get("originalStep7000Rank", 0)),
             "gtScore": float(gt_item["score"]) if gt_item else 0.0,
             "top1Correct": bool(gt_item and int(gt_item["rank"]) == 1),
             "topK": top_items,
@@ -1030,7 +1268,7 @@ def _build_csn_demo_session(test_id: str, top_k: int = 5) -> dict[str, Any]:
         "conceptSource": "xsearch_step7000_query_to_code_line_recomputed",
         "groundTruth": {
             "codeIdx": gt_idx,
-            "rank": int(gt_item["rank"]) if gt_item else 0,
+            "rank": int(gt_item["rank"]) if gt_item else int(config.get("originalStep7000Rank", 0)),
             "score": float(gt_item["score"]) if gt_item else 0.0,
             "top1Correct": bool(gt_item and int(gt_item["rank"]) == 1),
         },
@@ -1039,8 +1277,8 @@ def _build_csn_demo_session(test_id: str, top_k: int = 5) -> dict[str, Any]:
             "label": str(config["label"]),
             "presetSource": str(config["presetSource"]),
             "groundTruthCandidateId": f"code_{gt_idx}",
-            "groundTruthDisplayRank": int(gt_item["rank"]) if gt_item else 0,
-            "originalStep7000Rank": int(gt_item["rank"]) if gt_item else 0,
+            "groundTruthDisplayRank": int(gt_item["rank"]) if gt_item else int(config.get("originalStep7000Rank", 0)),
+            "originalStep7000Rank": int(gt_item["rank"]) if gt_item else int(config.get("originalStep7000Rank", 0)),
             "interactionCandidateId": str(config["interactionCandidateId"]),
             "queryTokenIndices": list(config["queryTokenIndices"]),
             "codeTokenIndex": int(config["codeTokenIndex"]),
@@ -1062,7 +1300,7 @@ def _build_csn_demo_candidate(test_id: str, candidate_id: str, ranking_score: fl
     query_tokens, query_concepts = _extract_query_concepts(_query_text(query_row))
     code_pack = _code_vectors_for_url(row.get("url", ""))
     if code_pack is None:
-        raise ValueError(f"candidate URL not found in step7000 packed cache: {row.get('url', '')}")
+        raise ValueError(f"candidate URL not found in Step-7000 packed cache: {row.get('url', '')}")
     hidden, scores = code_pack
     clusters = _line_centroids(row, hidden, scores)
     computed_score, matches = _score_code(query_concepts, clusters)
@@ -1141,7 +1379,7 @@ def _build_csn_demo_candidate(test_id: str, candidate_id: str, ranking_score: fl
 
 def build_session_payload(test_id: str, top_k: int = 10) -> dict[str, Any]:
     if is_csn_demo_test(test_id):
-        return _build_csn_demo_session(test_id, top_k)
+        return apply_single_reference_mode(_build_csn_demo_session(test_id, top_k))
 
     if _is_smoke_test(test_id):
         from .aligned_xsearch_service import build_aligned_smoke_session

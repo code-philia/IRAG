@@ -1,4 +1,4 @@
-import type { CandidateDetail, CandidateSummary, GradientAttribution, ManualLinkResponse, SessionPayload, TokenPairAttribution, VisualizationGraph } from "./types";
+import type { CandidateDetail, CandidateSummary, GenerationConfirmation, GenerationEvaluation, GenerationResult, GradientAttribution, ManualLinkResponse, SessionPayload, TokenPairAttribution, VisualizationGraph } from "./types";
 
 async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit, timeoutMs = 60000): Promise<T> {
   const controller = new AbortController();
@@ -145,4 +145,39 @@ export async function runGradientAttribution(payload: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   }, 120000);
+}
+
+export async function confirmReference(payload: {
+  caseId: string;
+  selectedCandidateId: string;
+  selectedRank: number | null;
+  selectedScore: number | null;
+  interactionUsed: boolean;
+  model: string;
+}): Promise<GenerationConfirmation> {
+  return fetchJson("/api/generation/confirm-reference", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function generateCode(payload: {
+  caseId: string;
+  selectionId?: string;
+  condition: "no_rag" | "automatic_rag" | "interactive_rag";
+}): Promise<GenerationResult> {
+  return fetchJson("/api/generation/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }, 130000);
+}
+
+export async function evaluateGeneration(generationId: string): Promise<GenerationEvaluation> {
+  return fetchJson("/api/generation/evaluate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ generationId })
+  }, 30000);
 }

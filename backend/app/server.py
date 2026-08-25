@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from .config import DEFAULT_DATASET_PATH, DEFAULT_EXPERIMENT_ID, DEFAULT_MATCH_PATH, LATEST_STEP_CHECKPOINT_PATH
-from .data_service import build_candidate_payload, build_session_payload, get_available_tests
+from .data_service import build_candidate_payload, build_session_payload, get_available_tests, is_hidden_reference_candidate
 from .dynavis_service import build_dynavis_graph
 from .gradient_attribution_service import build_gradient_attribution
 from .intervention_service import (
@@ -19,6 +19,7 @@ from .intervention_service import (
     reset_interventions,
 )
 from .log_service import append_event
+from .generation_service import confirm_reference, get_confirmed_generation_task, has_generation_task, generate_code, evaluate_generation
 from .training_attribution_service import build_token_pair_attribution
 
 
@@ -118,6 +119,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             elif path.startswith("/api/candidates/"):
                 candidate_id = path.rsplit("/", 1)[-1]
                 test_id = query.get("test_id", [""])[0]
+                if is_hidden_reference_candidate(test_id, candidate_id):
+                    self._send_json({"error": "This candidate is reserved for hidden evaluation."}, HTTPStatus.NOT_FOUND)
+                    return
                 if _requested_model(query=query) == "codebert":
                     self._send_json(_generic_service().build_candidate_payload(test_id, candidate_id))
                 else:
@@ -130,6 +134,15 @@ class ApiHandler(BaseHTTPRequestHandler):
                     self._send_json(_generic_service().build_graph(test_id, candidate_id))
                 else:
                     self._send_json(build_dynavis_graph(test_id, candidate_id, epoch))
+            elif path.startswith("/api/generation/task/"):
+                case_id = path.rsplit("/", 1)[-1]
+                selection_id = query.get("selection_id", [""])[0]
+                if not has_generation_task(case_id):
+                    self._send_json({"available": False}, HTTPStatus.NOT_FOUND)
+                elif not selection_id:
+                    self._send_json({"error": "Confirm one reference before requesting generation."}, HTTPStatus.FORBIDDEN)
+                else:
+                    self._send_json({"available": True, "task": get_confirmed_generation_task(case_id, selection_id)})
             else:
                 self._send_json({"error": f"Unknown endpoint: {path}"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -161,6 +174,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                     self._send_json(_cached_initial_bootstrap(test_id, top_k))
             elif parsed.path == "/api/logs/events":
                 self._send_json(append_event(data))
+            elif parsed.path in {"/api/generation/confirm-reference", "/api/generation/confirm-retrieval"}:
+                self._send_json(confirm_reference(data))
+            elif parsed.path == "/api/generation/generate":
+                self._send_json(generate_code(data))
+            elif parsed.path == "/api/generation/evaluate":
+                self._send_json(evaluate_generation(data))
             elif parsed.path == "/api/intervention/manual-link":
                 self._send_json(apply_manual_link(data))
             elif parsed.path == "/api/intervention/drag-rerank":

@@ -11,6 +11,7 @@ import torch.nn.functional as F
 
 from .config import (
     CONCEPT_COLORS,
+    CSN_API_BRIDGE_PREFIX_CACHE_PATH,
     CSN_FULL_STEP7000_CODE_CACHE_PATH,
     CSN_GT_PREFIX_CACHE_PATH,
     USER_STUDY_STEP7000_BLOCK_CACHE_PATH,
@@ -18,6 +19,7 @@ from .config import (
 )
 from .data_service import (
     CSN_RERANK_DEMO_CONFIG,
+    apply_single_reference_mode,
     build_code_lines,
     build_candidate_payload,
     build_session_payload,
@@ -86,7 +88,12 @@ def _csn_full_code_cache() -> tuple[torch.Tensor, torch.Tensor, list[str]]:
 
 @lru_cache(maxsize=1)
 def _csn_gt_prefix_cache() -> dict[str, dict[str, torch.Tensor]]:
-    return torch.load(CSN_GT_PREFIX_CACHE_PATH, map_location="cpu")
+    cache: dict[str, dict[str, torch.Tensor]] = {}
+    if CSN_GT_PREFIX_CACHE_PATH.exists():
+        cache.update(torch.load(CSN_GT_PREFIX_CACHE_PATH, map_location="cpu"))
+    if CSN_API_BRIDGE_PREFIX_CACHE_PATH.exists():
+        cache.update(torch.load(CSN_API_BRIDGE_PREFIX_CACHE_PATH, map_location="cpu"))
+    return cache
 
 
 @lru_cache(maxsize=1)
@@ -337,7 +344,7 @@ def apply_drag_rerank(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         reranked, details = _rerank_session(session, include_details=True)
 
-    return {
+    response = {
         "status": "ok",
         "candidates": reranked,
         "generalizedMatchesByCandidate": details,
@@ -353,6 +360,7 @@ def apply_drag_rerank(payload: dict[str, Any]) -> dict[str, Any]:
             "rerankWeight": RERANK_WEIGHT,
         },
     }
+    return apply_single_reference_mode({"testId": test_id, **response})
 
 
 def get_manual_links(test_id: str, candidate_id: str) -> list[dict[str, Any]]:
@@ -1017,14 +1025,14 @@ def _token_pair_deltas(
 def apply_adapter_to_session_payload(session: dict[str, Any]) -> dict[str, Any]:
     with GENERALIZATION_LOCK:
         if not GENERALIZATION_MEMORIES:
-            return session
+            return apply_single_reference_mode(session)
     full_reranked = _full_eval_rerank(str(session.get("testId") or ""))
     if full_reranked is not None:
-        return {**session, "candidates": full_reranked, "generalizationActive": True}
+        return apply_single_reference_mode({**session, "candidates": full_reranked, "generalizationActive": True})
     if is_csn_demo_test(str(session.get("testId") or "")):
-        return session
+        return apply_single_reference_mode(session)
     reranked, _details = _rerank_session(session, include_details=False)
-    return {**session, "candidates": reranked, "generalizationActive": True}
+    return apply_single_reference_mode({**session, "candidates": reranked, "generalizationActive": True})
 
 
 def apply_adapter_to_candidate_payload(candidate: dict[str, Any]) -> dict[str, Any]:

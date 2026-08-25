@@ -53,6 +53,10 @@ export type SessionPayload = {
     metadata: Record<string, string>;
   };
   candidates: CandidateSummary[];
+  referenceSelection?: {
+    enabled: boolean;
+    selectionLimit: 1;
+  };
   groundTruth?: {
     codeIdx: number;
     rank: number;
@@ -380,4 +384,54 @@ export type GradientAttribution = {
   harmfulSamples: GradientInfluenceSample[];
   helpfulBatches?: GradientInfluenceBatch[];
   harmfulBatches?: GradientInfluenceBatch[];
+};
+
+export type GenerationTask = {
+  caseId: string;
+  query: string;
+  language: string;
+};
+
+export type RetrievalSelection = {
+  id: string;
+  caseId: string;
+  selectedCandidateId: string;
+  selectedRank: number | null;
+  selectedScore: number | null;
+  interactionUsed: boolean;
+  candidate: {
+    id: string;
+    codeIdx: number;
+    rawCode: string;
+    metadata: Record<string, string>;
+  };
+};
+
+export type GenerationConfirmation = {
+  status: "ok";
+  selectionId: string;
+  task: GenerationTask;
+  selection: RetrievalSelection;
+};
+
+export type GenerationResult = {
+  status: "ok";
+  generationId: string;
+  caseId: string;
+  condition: "no_rag" | "automatic_rag" | "interactive_rag";
+  contextCandidateId: string | null;
+  generatedCode: string;
+  model: string;
+  promptVersion: string;
+  generationTime: number;
+};
+
+export type GenerationEvaluation = {
+  status: "ok" | "evaluation_unavailable";
+  generationId: string;
+  testsPassed?: number;
+  testsTotal?: number;
+  passRate?: number;
+  fullSuccess?: boolean;
+  message?: string;
 };

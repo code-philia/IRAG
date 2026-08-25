@@ -67,10 +67,16 @@ def _semantic_ast_blocks(raw_code: str, code_lines: list[dict[str, Any]]) -> lis
             del simple_group[:3]
             blocks.append({"id": f"block_{len(blocks)}", "kind": "simple", "startLine": min(int(node.lineno) for node in group), "endLine": max(int(getattr(node, "end_lineno", node.lineno)) for node in group)})
 
+    def function_header_range(node: Any) -> tuple[int, int]:
+        start_line = min([int(node.lineno), *(int(decorator.lineno) for decorator in node.decorator_list)])
+        first_body_line = min((int(statement.lineno) for statement in node.body), default=int(getattr(node, "end_lineno", node.lineno)))
+        return start_line, max(start_line, first_body_line - 1)
+
     for node in statements:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             flush_simple()
-            blocks.append({"id": f"block_{len(blocks)}", "kind": "function", "startLine": int(node.lineno), "endLine": int(node.lineno)})
+            start_line, end_line = function_header_range(node)
+            blocks.append({"id": f"block_{len(blocks)}", "kind": "function", "startLine": start_line, "endLine": end_line})
         elif isinstance(node, simple_types):
             simple_group.append(node)
         else:
@@ -409,23 +415,25 @@ def _hierarchy_payload(candidate: dict[str, Any], graph_nodes: list[dict[str, An
     lines_by_block: dict[str, list[dict[str, Any]]] = {}
     query_nodes_by_block: dict[str, list[dict[str, Any]]] = {}
     for block in blocks:
-        token_indices = [int(idx) for line in code_lines if int(block["startLine"]) <= int(line["lineNumber"]) <= int(block["endLine"]) for idx in line.get("tokenIndices", []) if int(idx) in code_by_token]
-        if not token_indices: continue
-        vector = _normalize(np.mean([normalized[code_by_token[idx]] for idx in token_indices], axis=0))
+        block_lines = [line for line in code_lines if int(block["startLine"]) <= int(line["lineNumber"]) <= int(block["endLine"])]
+        token_indices = [int(idx) for line in block_lines for idx in line.get("tokenIndices", []) if int(idx) in code_by_token]
+        representation_available = bool(token_indices)
+        vector = _normalize(np.mean([normalized[code_by_token[idx]] for idx in token_indices], axis=0)) if token_indices else (
+            block_vectors[-1].copy() if block_vectors else _hash_vector(f"structural-block::{candidate.get('id', '')}::{block['id']}", normalized.shape[1])
+        )
         scores = []
-        for concept in candidate.get("queryConcepts", []):
+        for concept in candidate.get("queryConcepts", []) if representation_available else []:
             q_indices = [int(item) for item in concept.get("tokenIndices", []) if int(item) in query_vectors]
             if q_indices: scores.append({"conceptId": int(concept["conceptId"]), "similarity": round(float(np.dot(_normalize(np.mean([query_vectors[item] for item in q_indices], axis=0)), vector)), 6)})
         scores.sort(key=lambda item: item["similarity"], reverse=True)
-        block_line_numbers = [int(line["lineNumber"]) for line in code_lines if int(block["startLine"]) <= int(line["lineNumber"]) <= int(block["endLine"])]
+        block_line_numbers = [int(line["lineNumber"]) for line in block_lines]
         display_start = display_line_number.get(block_line_numbers[0], block_line_numbers[0])
         display_end = display_line_number.get(block_line_numbers[-1], block_line_numbers[-1])
         range_label = f"L{display_start}" if display_start == display_end else f"L{display_start}-{display_end}"
-        block_items.append({**block, "tokenIndices": token_indices, "lineNumbers": block_line_numbers, "similarity": scores[0]["similarity"] if scores else 0.0, "conceptId": scores[0]["conceptId"] if scores else None, "conceptScores": scores, "signals": _hierarchy_signals(concept_vectors, token_indices, code_by_token, normalized, code_tokens, scores, suppress_latent_tokens=True), "label": f"{block['kind']} · {range_label}"})
+        block_items.append({**block, "tokenIndices": token_indices, "lineNumbers": block_line_numbers, "representationAvailable": representation_available, "similarity": scores[0]["similarity"] if scores else 0.0, "conceptId": scores[0]["conceptId"] if scores else None, "conceptScores": scores, "signals": _hierarchy_signals(concept_vectors, token_indices, code_by_token, normalized, code_tokens, scores, suppress_latent_tokens=True), "label": f"{block['kind']} · {range_label}"})
         block_vectors.append(vector)
         line_items = []
-        for line in code_lines:
-            if int(block["startLine"]) <= int(line["lineNumber"]) <= int(block["endLine"]):
+        for line in block_lines:
                 line_tokens = [int(idx) for idx in line.get("tokenIndices", []) if int(idx) in code_by_token]
                 if line_tokens:
                     line_vector = _normalize(np.mean([normalized[code_by_token[idx]] for idx in line_tokens], axis=0))
@@ -435,7 +443,9 @@ def _hierarchy_payload(candidate: dict[str, Any], graph_nodes: list[dict[str, An
                     matched_lines = {int(match.get("lineNumber", -1)) for match in candidate.get("conceptMatches", [])}
                     if block.get("kind") == "simple" and int(line["lineNumber"]) not in matched_lines and len(line_tokens) <= 4:
                         signals.append({"kind": "uncovered_line"})
-                    line_items.append({"lineNumber": int(line["lineNumber"]), "text": line["text"], "tokenIndices": line_tokens, "similarity": line_scores[0]["similarity"] if line_scores else 0.0, "conceptId": line_scores[0]["conceptId"] if line_scores else None, "conceptScores": line_scores, "signals": signals})
+                    line_items.append({"lineNumber": int(line["lineNumber"]), "text": line["text"], "tokenIndices": line_tokens, "representationAvailable": True, "similarity": line_scores[0]["similarity"] if line_scores else 0.0, "conceptId": line_scores[0]["conceptId"] if line_scores else None, "conceptScores": line_scores, "signals": signals, "_projectionVector": line_vector})
+                elif line.get("tokenIndices"):
+                    line_items.append({"lineNumber": int(line["lineNumber"]), "text": line["text"], "tokenIndices": [], "representationAvailable": False, "similarity": 0.0, "conceptId": None, "conceptScores": [], "signals": [], "_projectionVector": vector.copy()})
         lines_by_block[block["id"]] = line_items
     block_positions = _project_vectors(query_vectors_for_projection + block_vectors)
     for index, item in enumerate(block_items): item.update(block_positions[len(query_nodes) + index])
@@ -444,7 +454,7 @@ def _hierarchy_payload(candidate: dict[str, Any], graph_nodes: list[dict[str, An
     for block_id, lines in lines_by_block.items():
         vectors = [query_vectors_for_projection[index] for index in range(len(query_nodes))]
         for line in lines:
-            vectors.append(_normalize(np.mean([normalized[code_by_token[idx]] for idx in line["tokenIndices"]], axis=0)))
+            vectors.append(line.pop("_projectionVector"))
         positions = _project_vectors(vectors)
         query_nodes_by_block[block_id] = [{**node, **positions[index]} for index, node in enumerate(query_nodes)]
         for index, line in enumerate(lines): line.update(positions[len(query_nodes) + index])
