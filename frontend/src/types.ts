@@ -390,6 +390,9 @@ export type GenerationTask = {
   caseId: string;
   query: string;
   language: string;
+  evaluationAvailable: boolean;
+  functionSignature?: string;
+  generationInstruction?: string;
 };
 
 export type RetrievalSelection = {
@@ -414,6 +417,38 @@ export type GenerationConfirmation = {
   selection: RetrievalSelection;
 };
 
+export type TaskBrief = {
+  caseId: string;
+  version: string;
+  role: string;
+  systemContext: string;
+  domainObjects: Array<{ name: string; description: string }>;
+  essentialDomainKnowledge: string[];
+  taskQuery: string;
+  referenceSelectionInstruction: string;
+  sections?: Array<{
+    heading: string;
+    paragraphs?: string[];
+    codeBlocks?: Array<{ language?: string; content: string }>;
+    bullets?: string[];
+  }>;
+};
+
+export type StudySession = {
+  sessionId: string;
+  participantId: string;
+  condition: "baseline" | "irag";
+  experimentVersion: string;
+  createdAt: number;
+};
+
+export type ReferenceHint = {
+  status: "ok";
+  selectionId: string;
+  whatItDoes: string;
+  usefulClue: string;
+};
+
 export type GenerationResult = {
   status: "ok";
   generationId: string;
@@ -424,6 +459,8 @@ export type GenerationResult = {
   model: string;
   promptVersion: string;
   generationTime: number;
+  curatedGeneration?: boolean;
+  curatedCondition?: string;
 };
 
 export type GenerationEvaluation = {
@@ -433,5 +470,29 @@ export type GenerationEvaluation = {
   testsTotal?: number;
   passRate?: number;
   fullSuccess?: boolean;
+  apiPrecision?: number;
+  apiRecall?: number;
+  apiF1?: number;
+  matchedApis?: string[];
+  generatedApis?: string[];
+  groundTruthApis?: string[];
+  testResults?: Array<{
+    name: string;
+    passed: boolean;
+    error?: string;
+  }>;
   message?: string;
+};
+
+export type GenerationComparison = {
+  generationId: string;
+  caseId: string;
+  generatedCode: string;
+  groundTruth: {
+    candidateId: string;
+    functionName: string;
+    path: string;
+    rawCode: string;
+  };
+  evaluationAvailable: boolean;
 };

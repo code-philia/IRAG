@@ -49,6 +49,8 @@ SMOKE_CODEBASE_PATH = XSEARCH_ROOT / "training_lab/eval_results/python_coco_smok
 
 RUNS_DIR = ROOT_DIR / "data" / "dynavis_runs"
 LOG_DIR = ROOT_DIR / "data" / "logs"
+STUDY_DIR = ROOT_DIR / "data" / "study"
+STUDY_SESSION_DIR = STUDY_DIR / "sessions"
 GENERATION_DIR = ROOT_DIR / "data" / "generation"
 GENERATION_RECORDS_DIR = GENERATION_DIR / "records"
 GENERATION_RESULTS_DIR = GENERATION_DIR / "results"
@@ -70,6 +72,7 @@ CSN_PYTHON_CODEBASE_PATH = XSEARCH_ROOT / "preprocess_dataset/csn_data/python_co
 USER_STUDY_STEP7000_RANKING_PATH = ALIGNED_XSEARCH_DIR / "user_study_step7000_rankings.json"
 FULL_EVAL_STEP7000_RANKING_PATH = ALIGNED_XSEARCH_DIR / "full_eval_step7000_rankings.json"
 CSN_URL_MAPPED_API_DEMO_RANKINGS_PATH = ALIGNED_XSEARCH_DIR / "url_mapped_api_demo_rankings.json"
+SINGLE_REFERENCE_DEMO_RANKINGS_PATH = ALIGNED_XSEARCH_DIR / "single_reference_demo_rankings.json"
 API_BRIDGE_STEP7000_PACKED_PATH = ALIGNED_XSEARCH_DIR / "api_bridge_step7000_packed.pt"
 CSN_API_BRIDGE_PREFIX_CACHE_PATH = ALIGNED_XSEARCH_DIR / "api_bridge_gt_prefix_cache.pt"
 USER_STUDY_STEP7000_CODE_CACHE_PATH = ALIGNED_XSEARCH_DIR / "user_study_step7000_code_topk_cache.pt"

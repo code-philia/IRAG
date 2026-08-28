@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import re
+import tokenize
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -13,6 +15,7 @@ from .config import (
     CSN_PYTHON_CODEBASE_PATH,
     CSN_PYTHON_TEST_PATH,
     CSN_URL_MAPPED_API_DEMO_RANKINGS_PATH,
+    SINGLE_REFERENCE_DEMO_RANKINGS_PATH,
     DEFAULT_DATASET_PATH,
     DEFAULT_MATCH_PATH,
     FULL_EVAL_STEP7000_RANKING_PATH,
@@ -517,6 +520,49 @@ CSN_RERANK_DEMO_CONFIG: dict[str, dict[str, Any]] = {
         "codeTokenIndex": 16,
         "instruction": "检查 Rank1 keyword 的 kw_cache 路径；它处理 public keyword 创建，但 GT __get_or_create 同时完成私有缓存交换与 interned keyword 获取。共享 API 线索是低频 kw_cache，而不是词面重合。",
     },
+    "csn_7664": {
+        "label": "Variant Document-ID Reference Bridge",
+        "presetSource": "single_reference_api_bridge_screen",
+        "originalStep7000Rank": 12,
+        "queryIndex": 7664,
+        "groundTruthCodeIdx": 42423,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 26851}",
+        "queryTokenIndices": [0, 2, 6],
+        "codeTokenIndex": 10,
+        "instruction": "检查 Rank1 get_variantid：它只生成一个 document ID。parse_document_id 是低频的 variant-ID API；后位 reference 展示六个字段如何组成稳定 key，而隐藏实现还需要汇总四类 IDs。",
+    },
+    "csn_2613": {
+        "label": "Two-Qubit Gate Graph Reference Bridge",
+        "presetSource": "single_reference_api_bridge_screen",
+        "originalStep7000Rank": 19,
+        "queryIndex": 2613,
+        "groundTruthCodeIdx": 9603,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 36272}",
+        "queryTokenIndices": [12, 51],
+        "codeTokenIndex": 45,
+        "instruction": "检查 Rank1 的 deprecated get_2q_nodes 和 node.qargs；后位 reference twoQ_gates 返回可用于图构建的 gate nodes。隐藏实现正以这些 qargs 为边端点累计 CNOT interaction graph。",
+    },
+    "csn_12213": {
+        "label": "AST Operator Dispatch Reference Bridge",
+        "presetSource": "single_reference_api_bridge_screen",
+        "originalStep7000Rank": 4,
+        "queryIndex": 12213,
+        "groundTruthCodeIdx": 24571,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 41487}",
+        "queryTokenIndices": [2, 3, 5, 6],
+        "codeTokenIndex": 1,
+        "instruction": "检查 Rank1 的 general _ast_to_code dispatch；后位 reference 实现 concat operator 分支。隐藏实现需要先选择 operator branch，再调用该具体实现生成 source code。",
+    },
+    "csn_11772": {
+        "label": "Asset MIME-Type Extension Reference Bridge",
+        "presetSource": "single_reference_api_bridge_screen",
+        "queryIndex": 11772,
+        "groundTruthCodeIdx": 9854,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 29389}",
+        "queryTokenIndices": [0, 1, 2],
+        "codeTokenIndex": 36,
+        "instruction": "检查 Rank1 format_extension 的 environment.mimetypes.get(extension)：它只正向检查 extension 是否有 MIME 注册。把 mimetypes 拉向 implicit format extension；后位 reference mimetype 展示同一 registry 的读取模式，而隐藏实现通过遍历该 registry 将 compiler_mimetype 反查为 extension。",
+    },
     "csn_2812": {
         "label": "Qubit Dimension Log2 API Bridge Candidate",
         "presetSource": "url_mapped_step7000_shared_api_bridge",
@@ -759,6 +805,10 @@ SINGLE_REFERENCE_CASE_CONFIG: dict[str, dict[str, int]] = {
         "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 19602,
         "targetReferenceCodeIdx": CSN_CODE_OFFSET + 32299,
     },
+    "csn_7664": {"hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 42423, "targetReferenceCodeIdx": CSN_CODE_OFFSET + 29009},
+    "csn_2613": {"hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 9603, "targetReferenceCodeIdx": CSN_CODE_OFFSET + 20329},
+    "csn_12213": {"hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 24571, "targetReferenceCodeIdx": CSN_CODE_OFFSET + 40341},
+    "csn_11772": {"hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 9854, "targetReferenceCodeIdx": CSN_CODE_OFFSET + 1612},
 }
 
 
@@ -777,11 +827,22 @@ def apply_single_reference_mode(session: dict[str, Any]) -> dict[str, Any]:
     if not config:
         return session
     hidden_id = f"code_{int(config['hiddenGroundTruthCodeIdx'])}"
+    source_candidates = list(session.get("candidates", []))
     candidates = [
         {key: value for key, value in candidate.items() if key != "isGroundTruth"}
-        for candidate in session.get("candidates", [])
+        for candidate in source_candidates
         if str(candidate.get("id")) != hidden_id
     ]
+
+    # The hidden generation target must not leave a visible rank gap.  Session
+    # builders load one extra item for single-reference cases, so filtering the
+    # target promotes the next retrieval result into the participant's Top-20.
+    visible_limit = 20 if len(source_candidates) >= 21 else len(candidates)
+    candidates.sort(key=lambda candidate: int(candidate.get("rank", visible_limit + 1)))
+    candidates = candidates[:visible_limit]
+    for visible_rank, candidate in enumerate(candidates, start=1):
+        candidate["rank"] = visible_rank
+
     payload = {
         key: value
         for key, value in session.items()
@@ -874,7 +935,22 @@ def _load_url_mapped_api_demo_rankings() -> dict[str, list[dict[str, Any]]]:
     }
 
 
+def _load_single_reference_demo_rankings() -> dict[str, list[dict[str, Any]]]:
+    if not SINGLE_REFERENCE_DEMO_RANKINGS_PATH.exists():
+        return {}
+    with open(SINGLE_REFERENCE_DEMO_RANKINGS_PATH, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return {
+        str(test_id): [
+            {"codeIdx": int(item["codeIdx"]), "score": float(item["score"]), "rank": int(item["rank"])}
+            for item in items
+        ]
+        for test_id, items in payload.items()
+    }
+
+
 CSN_RERANK_DEMO_TOP_ITEMS.update(_load_url_mapped_api_demo_rankings())
+CSN_RERANK_DEMO_TOP_ITEMS.update(_load_single_reference_demo_rankings())
 
 
 @lru_cache(maxsize=8)
@@ -1172,33 +1248,32 @@ def build_code_lines(raw_code: str, code_tokens: list[str]) -> list[dict[str, An
     if not code_tokens:
         return result
 
-    line_starts: list[int] = []
-    offset = 0
-    for line in lines:
-        line_starts.append(offset)
-        offset += len(line) + 1
+    source_tokens: list[tuple[str, int]] = []
+    try:
+        for source_token in tokenize.generate_tokens(io.StringIO(raw_code).readline):
+            if source_token.type in {tokenize.NAME, tokenize.NUMBER, tokenize.STRING, tokenize.OP}:
+                source_tokens.append((source_token.string, int(source_token.start[0])))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return result
 
-    def line_for_offset(position: int) -> int:
-        line_idx = 0
-        for idx, start in enumerate(line_starts):
-            if start <= position:
-                line_idx = idx
-            else:
-                break
-        return min(line_idx, len(result) - 1)
+    def token_forms(value: Any) -> set[str]:
+        text = str(value)
+        forms = {text, text.lstrip("Ġ▁")}
+        for item in list(forms):
+            if len(item) >= 2 and item[0] in {"'", '"'} and item[-1] == item[0]:
+                forms.add(item[1:-1])
+        return {item for item in forms if item}
 
-    cursor = 0
-    current_line_idx = 0
+    source_cursor = 0
     for token_idx, token in enumerate(code_tokens):
-        token_text_value = str(token)
-        found = raw_code.find(token_text_value, cursor)
-        if found < 0 and token_text_value.startswith(("'", '"')) and token_text_value.endswith(("'", '"')):
-            found = raw_code.find(token_text_value[1:-1], cursor)
-        if found < 0:
+        forms = token_forms(token)
+        matched_index = next((index for index in range(source_cursor, len(source_tokens)) if source_tokens[index][0] in forms), None)
+        if matched_index is None:
             continue
-        current_line_idx = line_for_offset(found)
-        result[current_line_idx]["tokenIndices"].append(token_idx)
-        cursor = max(found + max(1, len(token_text_value)), cursor)
+        _source_value, line_number = source_tokens[matched_index]
+        if 1 <= line_number <= len(result):
+            result[line_number - 1]["tokenIndices"].append(token_idx)
+        source_cursor = matched_index + 1
     return result
 
 
@@ -1355,6 +1430,15 @@ def _build_csn_demo_candidate(test_id: str, candidate_id: str, ranking_score: fl
                 "similarity": 0.451,
             })
 
+    if str(test_id) == "csn_11772" and code_idx == CSN_CODE_OFFSET + 29389:
+        compiler_match = next((match for match in concept_matches if int(match["conceptId"]) == 2), None)
+        if compiler_match:
+            compiler_match.update({
+                "codeTokenIndices": list(range(28, 43)),
+                "lineNumber": 15,
+                "codeText": "if not compiler and self.environment.mimetypes.get(extension):",
+            })
+
     raw_code = row.get("clean_code") or row.get("code") or row.get("original_string") or ""
     return {
         "id": f"code_{code_idx}",
@@ -1379,7 +1463,8 @@ def _build_csn_demo_candidate(test_id: str, candidate_id: str, ranking_score: fl
 
 def build_session_payload(test_id: str, top_k: int = 10) -> dict[str, Any]:
     if is_csn_demo_test(test_id):
-        return apply_single_reference_mode(_build_csn_demo_session(test_id, top_k))
+        source_top_k = top_k + 1 if is_single_reference_case(test_id) else top_k
+        return apply_single_reference_mode(_build_csn_demo_session(test_id, source_top_k))
 
     if _is_smoke_test(test_id):
         from .aligned_xsearch_service import build_aligned_smoke_session

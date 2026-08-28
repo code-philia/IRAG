@@ -1,4 +1,16 @@
-import type { CandidateDetail, CandidateSummary, GenerationConfirmation, GenerationEvaluation, GenerationResult, GradientAttribution, ManualLinkResponse, SessionPayload, TokenPairAttribution, VisualizationGraph } from "./types";
+import type { CandidateDetail, CandidateSummary, GenerationComparison, GenerationConfirmation, GenerationEvaluation, GenerationResult, GradientAttribution, ManualLinkResponse, ReferenceHint, SessionPayload, StudySession, TaskBrief, TokenPairAttribution, VisualizationGraph } from "./types";
+
+let eventContext: Partial<StudySession> & { caseAttemptId?: string } = {};
+
+export function setEventContext(context: Partial<StudySession> & { caseAttemptId?: string }) {
+  eventContext = context;
+}
+
+function currentAppMode() {
+  if (window.location.pathname.startsWith("/baseline")) return "baseline";
+  if (window.location.pathname.startsWith("/study")) return "study";
+  return "demo";
+}
 
 async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit, timeoutMs = 60000): Promise<T> {
   const controller = new AbortController();
@@ -47,16 +59,33 @@ export async function loadGraph(testId: string, candidateId: string, epoch = 4, 
   );
 }
 
-export function logEvent(eventType: string, eventData: Record<string, unknown>) {
-  void fetch("/api/logs/events", {
+export async function logEvent(eventType: string, eventData: Record<string, unknown>): Promise<void> {
+  const response = await fetch("/api/logs/events", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      sessionId: "local_preview",
+      sessionId: eventContext.sessionId || "local_preview",
+      participantId: eventContext.participantId || "",
+      condition: eventContext.condition || currentAppMode(),
+      caseId: String(eventData.caseId || eventData.testId || ""),
       eventType,
-      eventData
+      eventData: { ...eventData, caseAttemptId: eventData.caseAttemptId || eventContext.caseAttemptId || "", appMode: currentAppMode() }
     })
   });
+  if (!response.ok) throw new Error(await response.text());
+}
+
+export async function startStudySession(participantId: string, condition: "baseline" | "irag"): Promise<StudySession> {
+  const response = await fetchJson<{ status: "ok"; session: StudySession }>("/api/study/session/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ participantId, condition })
+  });
+  return response.session;
+}
+
+export async function loadTaskBrief(caseId: string): Promise<TaskBrief> {
+  return fetchJson(`/api/study/brief/${encodeURIComponent(caseId)}`);
 }
 
 export async function createManualLink(payload: {
@@ -154,12 +183,32 @@ export async function confirmReference(payload: {
   selectedScore: number | null;
   interactionUsed: boolean;
   model: string;
+  appMode?: "demo" | "study" | "baseline";
+  sessionId?: string;
+  participantId?: string;
+  caseAttemptId?: string;
 }): Promise<GenerationConfirmation> {
   return fetchJson("/api/generation/confirm-reference", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
+}
+
+export async function finalizeReference(selectionId: string): Promise<GenerationConfirmation> {
+  return fetchJson("/api/generation/finalize-reference", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selectionId })
+  });
+}
+
+export async function loadReferenceHint(selectionId: string): Promise<ReferenceHint> {
+  return fetchJson("/api/generation/reference-hint", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selectionId })
+  }, 130000);
 }
 
 export async function generateCode(payload: {
@@ -180,4 +229,8 @@ export async function evaluateGeneration(generationId: string): Promise<Generati
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ generationId })
   }, 30000);
+}
+
+export async function loadGenerationComparison(generationId: string): Promise<GenerationComparison> {
+  return fetchJson(`/api/generation/comparison/${encodeURIComponent(generationId)}`);
 }

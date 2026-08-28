@@ -35,16 +35,19 @@ def _normalize(vec: np.ndarray) -> np.ndarray:
 
 
 def _semantic_ast_blocks(raw_code: str, code_lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return top-level semantic blocks using the agreed B-A-C policy."""
+    """Partition code into contiguous segments at nested control-flow boundaries."""
     try:
         tree = ast.parse(raw_code)
     except SyntaxError:
         return [{"id": f"block_{idx}", "kind": "line", "startLine": line["lineNumber"], "endLine": line["lineNumber"]} for idx, line in enumerate(code_lines)]
-    statements: list[ast.stmt] = []
+
+    fallback = [{"id": f"block_{idx}", "kind": "line", "startLine": line["lineNumber"], "endLine": line["lineNumber"]} for idx, line in enumerate(code_lines)]
+    statements: list[ast.stmt]
+    function_header: tuple[int, int] | None = None
+    ignored_line_numbers: set[int] = set()
     functions = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
     if functions:
         function = functions[0]
-        statements.append(function)
         function_body = list(function.body)
         if (
             function_body
@@ -52,39 +55,84 @@ def _semantic_ast_blocks(raw_code: str, code_lines: list[dict[str, Any]]) -> lis
             and isinstance(getattr(function_body[0], "value", None), ast.Constant)
             and isinstance(function_body[0].value.value, str)
         ):
+            ignored_line_numbers.update(range(int(function_body[0].lineno), int(getattr(function_body[0], "end_lineno", function_body[0].lineno)) + 1))
             function_body = function_body[1:]
-        statements.extend(function_body)
+        start_line = min([int(function.lineno), *(int(decorator.lineno) for decorator in function.decorator_list)])
+        first_body_line = min((int(statement.lineno) for statement in function.body), default=int(getattr(function, "end_lineno", function.lineno)))
+        function_header = (start_line, max(start_line, first_body_line - 1))
+        statements = function_body
     else:
         statements = list(tree.body)
+
+    control_entries: list[dict[str, Any]] = []
+    match_node = getattr(ast, "Match", None)
+    control_nodes = (ast.For, ast.AsyncFor, ast.While, ast.If, ast.With, ast.AsyncWith, ast.Try) + ((match_node,) if match_node else ())
+
+    def add_control(node: ast.AST, kind: str, depth: int) -> None:
+        control_entries.append({
+            "id": f"{kind}_{len(control_entries)}",
+            "kind": kind,
+            "startLine": int(getattr(node, "lineno")),
+            "endLine": int(getattr(node, "end_lineno", getattr(node, "lineno"))),
+            "depth": depth,
+        })
+
+    def visit_statements(nodes: list[ast.stmt], depth: int, elif_branch: bool = False) -> None:
+        for node in nodes:
+            if isinstance(node, ast.If):
+                add_control(node, "elif" if elif_branch else "if", depth)
+                visit_statements(list(node.body), depth + 1)
+                if node.orelse:
+                    first_else = node.orelse[0]
+                    if isinstance(first_else, ast.If):
+                        visit_statements([first_else], depth + 1, elif_branch=True)
+                        visit_statements(list(node.orelse[1:]), depth + 1)
+                    else:
+                        visit_statements(list(node.orelse), depth + 1)
+            elif isinstance(node, control_nodes):
+                add_control(node, type(node).__name__.lower(), depth)
+                visit_statements(list(getattr(node, "body", [])), depth + 1)
+                visit_statements(list(getattr(node, "orelse", [])), depth + 1)
+                for handler in getattr(node, "handlers", []):
+                    add_control(handler, "except", depth + 1)
+                    visit_statements(list(handler.body), depth + 2)
+                visit_statements(list(getattr(node, "finalbody", [])), depth + 1)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                add_control(node, "function", depth)
+
+    visit_statements(statements, depth=0)
     blocks: list[dict[str, Any]] = []
-    simple_group: list[ast.stmt] = []
-    simple_types = (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Expr, ast.Import, ast.ImportFrom, ast.Pass, ast.Assert, ast.Delete, ast.Return, ast.Raise, ast.Break, ast.Continue)
+    if function_header:
+        blocks.append({"id": "block_0", "kind": "function", "startLine": function_header[0], "endLine": function_header[1]})
 
-    def flush_simple() -> None:
-        nonlocal simple_group
-        while simple_group:
-            group = simple_group[:3]
-            del simple_group[:3]
-            blocks.append({"id": f"block_{len(blocks)}", "kind": "simple", "startLine": min(int(node.lineno) for node in group), "endLine": max(int(getattr(node, "end_lineno", node.lineno)) for node in group)})
+    body_start = function_header[1] + 1 if function_header else min((int(line["lineNumber"]) for line in code_lines), default=1)
+    body_lines = [line for line in code_lines if int(line["lineNumber"]) >= body_start and int(line["lineNumber"]) not in ignored_line_numbers]
 
-    def function_header_range(node: Any) -> tuple[int, int]:
-        start_line = min([int(node.lineno), *(int(decorator.lineno) for decorator in node.decorator_list)])
-        first_body_line = min((int(statement.lineno) for statement in node.body), default=int(getattr(node, "end_lineno", node.lineno)))
-        return start_line, max(start_line, first_body_line - 1)
+    def owner_for_line(line_number: int) -> dict[str, Any] | None:
+        owners = [entry for entry in control_entries if entry["startLine"] <= line_number <= entry["endLine"]]
+        return max(owners, key=lambda entry: (entry["depth"], entry["startLine"])) if owners else None
 
-    for node in statements:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            flush_simple()
-            start_line, end_line = function_header_range(node)
-            blocks.append({"id": f"block_{len(blocks)}", "kind": "function", "startLine": start_line, "endLine": end_line})
-        elif isinstance(node, simple_types):
-            simple_group.append(node)
+    segments: list[dict[str, Any]] = []
+    for line in body_lines:
+        owner = owner_for_line(int(line["lineNumber"]))
+        key = owner["id"] if owner else "simple"
+        if segments and segments[-1]["key"] == key and int(line["lineNumber"]) == segments[-1]["endLine"] + 1:
+            segments[-1]["endLine"] = int(line["lineNumber"])
         else:
-            flush_simple()
-            blocks.append({"id": f"block_{len(blocks)}", "kind": type(node).__name__.lower(), "startLine": int(node.lineno), "endLine": int(getattr(node, "end_lineno", node.lineno))})
-    flush_simple()
+            segments.append({"key": key, "kind": owner["kind"] if owner else "simple", "startLine": int(line["lineNumber"]), "endLine": int(line["lineNumber"])})
+
+    for segment in segments:
+        if segment["kind"] == "simple":
+            start_line = segment["startLine"]
+            while start_line <= segment["endLine"]:
+                end_line = min(start_line + 2, segment["endLine"])
+                blocks.append({"id": f"block_{len(blocks)}", "kind": "simple", "startLine": start_line, "endLine": end_line})
+                start_line = end_line + 1
+        else:
+            blocks.append({"id": f"block_{len(blocks)}", "kind": segment["kind"], "startLine": segment["startLine"], "endLine": segment["endLine"]})
+
     if not blocks:
-        return [{"id": f"block_{idx}", "kind": "line", "startLine": line["lineNumber"], "endLine": line["lineNumber"]} for idx, line in enumerate(code_lines)]
+        return fallback
     return blocks
 
 
@@ -127,7 +175,8 @@ def _expand_hierarchy_display_layout(code_nodes: list[dict[str, Any]], query_nod
         return
     relevant = [
         node for node in code_nodes
-        if max((float(score.get("similarity", -1.0)) for score in node.get("conceptScores", [])), default=float(node.get("similarity", -1.0))) >= 0.20
+        if node.get("displayConceptIds")
+        or max((float(score.get("similarity", -1.0)) for score in node.get("conceptScores", [])), default=float(node.get("similarity", -1.0))) >= 0.20
     ]
     irrelevant = [node for node in code_nodes if node not in relevant]
     concept_nodes = [node for node in query_nodes if node.get("type") == "query_concept"]
@@ -147,6 +196,13 @@ def _expand_line_display_layout(lines: list[dict[str, Any]], query_nodes: list[d
     winner_ids: set[str] = set()
     concept_ids = {int(score["conceptId"]) for line in lines for score in line.get("conceptScores", [])}
     for concept_id in concept_ids:
+        display_lines = [
+            line for line in lines
+            if concept_id in {int(item) for item in line.get("displayConceptIds", [])}
+        ]
+        if display_lines:
+            winner_ids.update(str(line.get("id", line.get("lineNumber"))) for line in display_lines)
+            continue
         scored = [
             (line, next((float(score["similarity"]) for score in line.get("conceptScores", []) if int(score["conceptId"]) == concept_id), -1.0))
             for line in lines
@@ -327,9 +383,17 @@ def _apply_curated_hierarchy_display_matches(
     candidate: dict[str, Any], blocks: list[dict[str, Any]], lines_by_block: dict[str, list[dict[str, Any]]]
 ) -> None:
     """Apply explicitly documented display alignments without changing model scores."""
-    if str(candidate.get("testId")) != "csn_11078" or int(candidate.get("codeIdx", -1)) != 1022739:
+    test_id = str(candidate.get("testId"))
+    code_idx = int(candidate.get("codeIdx", -1))
+    if test_id == "csn_11078" and code_idx == 1022739:
+        display_matches = {1: 1, 8: 0}
+    elif test_id == "csn_11772" and code_idx == 1029389:
+        # The compact viewer omits the function docstring, so source L15 is
+        # displayed as L4. Keep the compiler concept anchored to its explicit
+        # `compiler` token through the block -> line -> token drill-down.
+        display_matches = {15: 2}
+    else:
         return
-    display_matches = {1: 1, 8: 0}
     for block in blocks:
         concept_ids = [
             concept_id
@@ -343,7 +407,7 @@ def _apply_curated_hierarchy_display_matches(
             concept_id = display_matches.get(int(line["lineNumber"]))
             if concept_id is not None:
                 line["displayConceptIds"] = [concept_id]
-            if int(line["lineNumber"]) != 7:
+            if test_id != "csn_11078" or int(line["lineNumber"]) != 7:
                 continue
             line["signals"] = [
                 signal
@@ -450,6 +514,7 @@ def _hierarchy_payload(candidate: dict[str, Any], graph_nodes: list[dict[str, An
     block_positions = _project_vectors(query_vectors_for_projection + block_vectors)
     for index, item in enumerate(block_items): item.update(block_positions[len(query_nodes) + index])
     for index, node in enumerate(query_nodes): node.update(block_positions[index])
+    _apply_curated_hierarchy_display_matches(candidate, block_items, lines_by_block)
     _expand_block_display_layout(block_items, query_nodes)
     for block_id, lines in lines_by_block.items():
         vectors = [query_vectors_for_projection[index] for index in range(len(query_nodes))]
@@ -461,7 +526,6 @@ def _hierarchy_payload(candidate: dict[str, Any], graph_nodes: list[dict[str, An
         _expand_line_display_layout(lines, query_nodes_by_block[block_id])
     _remove_matched_line_recommendations(candidate, lines_by_block)
     _add_curated_recommendation_signals(candidate, lines_by_block)
-    _apply_curated_hierarchy_display_matches(candidate, block_items, lines_by_block)
     _apply_csn11078_display_layout(candidate, block_items, query_nodes_by_block, lines_by_block)
     _limit_hierarchy_signals(block_items, lines_by_block)
     recommended_tokens = _expanded_recommendation_tokens(block_items, lines_by_block, code_tokens, code_by_token)

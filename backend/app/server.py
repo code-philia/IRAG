@@ -18,8 +18,9 @@ from .intervention_service import (
     apply_manual_link,
     reset_interventions,
 )
-from .log_service import append_event
-from .generation_service import confirm_reference, get_confirmed_generation_task, has_generation_task, generate_code, evaluate_generation
+from .generation_service import confirm_reference, finalize_reference, get_confirmed_generation_task, get_generation_comparison, get_reference_hint, has_generation_task, generate_code, evaluate_generation
+from .log_service import append_event, store_study_session
+from .study_service import create_study_session, get_task_brief
 from .training_attribution_service import build_token_pair_attribution
 
 
@@ -143,6 +144,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": "Confirm one reference before requesting generation."}, HTTPStatus.FORBIDDEN)
                 else:
                     self._send_json({"available": True, "task": get_confirmed_generation_task(case_id, selection_id)})
+            elif path.startswith("/api/generation/comparison/"):
+                generation_id = path.rsplit("/", 1)[-1]
+                self._send_json(get_generation_comparison(generation_id))
+            elif path.startswith("/api/study/brief/"):
+                case_id = path.rsplit("/", 1)[-1]
+                self._send_json(get_task_brief(case_id))
             else:
                 self._send_json({"error": f"Unknown endpoint: {path}"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -174,12 +181,20 @@ class ApiHandler(BaseHTTPRequestHandler):
                     self._send_json(_cached_initial_bootstrap(test_id, top_k))
             elif parsed.path == "/api/logs/events":
                 self._send_json(append_event(data))
+            elif parsed.path == "/api/study/session/start":
+                session = create_study_session(data)
+                store_study_session(session)
+                self._send_json({"status": "ok", "session": session})
             elif parsed.path in {"/api/generation/confirm-reference", "/api/generation/confirm-retrieval"}:
                 self._send_json(confirm_reference(data))
+            elif parsed.path == "/api/generation/finalize-reference":
+                self._send_json(finalize_reference(data))
             elif parsed.path == "/api/generation/generate":
                 self._send_json(generate_code(data))
             elif parsed.path == "/api/generation/evaluate":
                 self._send_json(evaluate_generation(data))
+            elif parsed.path == "/api/generation/reference-hint":
+                self._send_json(get_reference_hint(data))
             elif parsed.path == "/api/intervention/manual-link":
                 self._send_json(apply_manual_link(data))
             elif parsed.path == "/api/intervention/drag-rerank":

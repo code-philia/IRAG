@@ -1,30 +1,41 @@
 import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ArrowDown, ArrowLeftRight, ArrowUp, CirclePlay, Loader2, Maximize2, Move, RefreshCw, ZoomIn, ZoomOut } from "lucide-react";
-import { applyDragRerank, confirmReference, createManualLink, evaluateGeneration, generateCode, getExperiments, loadCandidate, loadGraph, loadSession, loadSessionBootstrap, loadTokenPairAttribution, logEvent, resetInterventions, runGradientAttribution } from "./api";
+import { applyDragRerank, confirmReference, createManualLink, evaluateGeneration, finalizeReference, generateCode, getExperiments, loadCandidate, loadGenerationComparison, loadGraph, loadReferenceHint, loadSession, loadSessionBootstrap, loadTaskBrief, loadTokenPairAttribution, logEvent, resetInterventions, runGradientAttribution, setEventContext, startStudySession } from "./api";
 import type {
   CandidateDetail,
   CandidateSummary,
   Concept,
+  GenerationComparison,
   GenerationConfirmation,
   GenerationEvaluation,
   GenerationResult,
   GradientAttribution,
   GraphNode,
   ManualLink,
+  ReferenceHint,
   SessionPayload,
+  StudySession,
+  TaskBrief,
   TokenPairAttribution,
   VisualizationGraph
 } from "./types";
 import "./styles.css";
 
 const DEFAULT_TEST_ID = "";
-const FOCUS_TEST_IDS = [DEFAULT_TEST_ID, "48", "1556", "1642", "2695", "3856", "954", "csn_9848", "csn_11087", "csn_11078", "csn_9406", "csn_400", "csn_13958", "csn_13527", "csn_8838", "csn_2812", "csn_7727", "csn_4772", "csn_10023", "csn_2207", "csn_5340", "csn_10164", "csn_13655", "csn_14175", "csn_10643", "csn_12075"];
-const GENERATION_CASE_IDS = new Set(["csn_8838"]);
+type AppMode = "demo" | "study" | "baseline";
+const APP_MODE: AppMode = window.location.pathname.startsWith("/baseline")
+  ? "baseline"
+  : window.location.pathname.startsWith("/study")
+    ? "study"
+    : "demo";
+const FOCUS_TEST_IDS = [DEFAULT_TEST_ID, "48", "1556", "1642", "2695", "3856", "954", "csn_9848", "csn_11087", "csn_11078", "csn_9406", "csn_400", "csn_13958", "csn_13527", "csn_8838", "csn_7664", "csn_2613", "csn_12213", "csn_11772", "csn_2812", "csn_7727", "csn_4772", "csn_10023", "csn_2207", "csn_5340", "csn_10164", "csn_13655", "csn_14175", "csn_10643", "csn_12075"];
+const GENERATION_CASE_IDS = new Set(["csn_8838", "csn_7664", "csn_2613", "csn_12213", "csn_11772"]);
 const GRAPH_WIDTH = 880;
 const GRAPH_HEIGHT = 560;
 const SUPPORT_QUERY_EVIDENCE_THRESHOLD = 0.55;
 const CONFLICT_QUERY_EVIDENCE_THRESHOLD = 0.35;
+const PREFETCH_GRAPH_LIMIT = 5;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -77,6 +88,37 @@ function displayQueryOriginal(text: string | number | null | undefined) {
   const withoutCodeBlock = raw.split(/\.\.\s*code-block::|code-block::/i)[0];
   const firstParagraph = withoutCodeBlock.split(/\n\s*\n/)[0];
   return firstParagraph.replace(/\s+/g, " ").trim() || raw.replace(/\s+/g, " ").trim();
+}
+
+function withoutLeadingFunctionDocstring(code: string) {
+  const lines = code.split("\n");
+  let functionBodyStarted = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const trimmed = lines[index].trim();
+    if (!functionBodyStarted) {
+      if (trimmed.endsWith(":")) functionBodyStarted = true;
+      continue;
+    }
+    if (!trimmed) continue;
+    const opening = trimmed.match(/^(\"\"\"|''')/);
+    if (!opening) return code;
+    const quote = opening[1];
+    const remaining = trimmed.slice(quote.length);
+    let endIndex = index;
+    if (!remaining.includes(quote)) {
+      endIndex += 1;
+      while (endIndex < lines.length && !lines[endIndex].includes(quote)) endIndex += 1;
+      if (endIndex >= lines.length) return code;
+    }
+    return [...lines.slice(0, index), ...lines.slice(endIndex + 1)].join("\n");
+  }
+  return code;
+}
+
+function createClientId(prefix: string) {
+  const randomUuid = globalThis.crypto?.randomUUID;
+  if (typeof randomUuid === "function") return `${prefix}_${randomUuid.call(globalThis.crypto)}`;
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
 }
 
 function graphTokenLabel(token: string | number | null | undefined) {
@@ -1045,10 +1087,26 @@ function QueryPanel({
   );
 }
 
+function BaselineQueryPanel({ session }: { session: SessionPayload | null }) {
+  return (
+    <aside className="panel query-panel baseline-query-panel">
+      <div className="panel-title">Query</div>
+      {session ? (
+        <>
+          <div className="query-text">{session.query.rawText}</div>
+          {session.query.metadata.path ? <div className="meta-line">{session.query.metadata.path}</div> : null}
+        </>
+      ) : <div className="meta-line">No query loaded.</div>}
+    </aside>
+  );
+}
+
 function CandidatePanel({
   candidates,
   selectedId,
   onSelect,
+  modelId,
+  showGroundTruth = true,
   adjudicationMode = false,
   adjudicationIds,
   onAdjudicationToggle
@@ -1056,6 +1114,8 @@ function CandidatePanel({
   candidates: CandidateSummary[];
   selectedId: string | null;
   onSelect: (candidate: CandidateSummary) => void;
+  modelId: string;
+  showGroundTruth?: boolean;
   adjudicationMode?: boolean;
   adjudicationIds: string[];
   onAdjudicationToggle: (candidate: CandidateSummary) => void;
@@ -1083,7 +1143,7 @@ function CandidatePanel({
                   {candidate.similarityDelta != null ? ` · sim ${candidate.similarityDelta > 0 ? "+" : ""}${candidate.similarityDelta.toFixed(3)}` : ""}
                 </small>
               ) : null}
-              {candidate.isGroundTruth ? <small className="ground-truth-label">Ground truth</small> : null}
+              {showGroundTruth && modelId !== "codebert" && candidate.isGroundTruth ? <small className="ground-truth-label">Ground truth</small> : null}
             </span>
             <span className="score" title={`similarity ${candidate.similarity.toFixed(3)}`}>{candidate.similarity.toFixed(3)}</span>
             </button>
@@ -1097,11 +1157,13 @@ function CandidatePanel({
 function AdjudicationPanel({
   session,
   candidates,
-  summaries
+  summaries,
+  showGroundTruth = true
 }: {
   session: SessionPayload;
   candidates: CandidateDetail[];
   summaries: Record<string, CandidateSummary>;
+  showGroundTruth?: boolean;
 }) {
   const conceptById = useMemo(() => new Map(session.query.concepts.map((concept) => [concept.conceptId, concept])), [session.query.concepts]);
   if (candidates.length !== 2) return null;
@@ -1118,7 +1180,7 @@ function AdjudicationPanel({
           const summary = summaries[candidate.id];
           const lines = candidate.codeLines.filter((line) => line.tokenIndices.length > 0);
           return (
-            <article key={candidate.id} className={`adjudication-candidate${summary?.isGroundTruth ? " ground-truth" : ""}`}>
+            <article key={candidate.id} className={`adjudication-candidate${showGroundTruth && session.model?.id !== "codebert" && summary?.isGroundTruth ? " ground-truth" : ""}`}>
               <div className="adjudication-candidate-title">
                 <strong>{summary?.metadata.funcName || candidate.metadata.funcName || candidate.id}</strong>
                 <span>Rank {summary?.rank ?? "-"} · sim {(summary?.similarity ?? candidate.similarity).toFixed(3)}</span>
@@ -1826,7 +1888,7 @@ function CodeViewer({
                     return (
                       <Fragment key={idx}>
                       <button
-                        className={`${selected ? "line-token active" : "line-token"}${recommended ? " inspect-token" : ""}${showTokenHighlight && manual ? " manual-token" : ""}${showTokenHighlight && hasTokenFocus && !selected ? " dimmed" : ""}`}
+                        className={`${selected ? "line-token active" : "line-token"}${recommended ? " inspect-token" : ""}${showTokenHighlight && manual ? " manual-token" : ""}${canvasLevel !== "line_tokens" && showTokenHighlight && hasTokenFocus && !selected ? " dimmed" : ""}`}
                         title={inspectLabel}
                         aria-label={inspectLabel}
                         style={showTokenHighlight ? (
@@ -1866,6 +1928,26 @@ function CodeViewer({
           })}
         </div>
       </div>
+    </section>
+  );
+}
+
+function BaselineCodeViewer({
+  candidate,
+  displaySimilarity
+}: {
+  candidate: CandidateDetail | null;
+  displaySimilarity?: number;
+}) {
+  if (!candidate) return <section className="panel baseline-code-viewer muted">No candidate selected.</section>;
+  return (
+    <section className="panel baseline-code-viewer">
+      <div className="panel-title">Code Viewer</div>
+      <div className="code-meta">
+        <span>{candidate.metadata.funcName || candidate.id}</span>
+        <span>similarity {(displaySimilarity ?? candidate.similarity).toFixed(3)}</span>
+      </div>
+      <pre className="baseline-code-content">{withoutLeadingFunctionDocstring(candidate.rawCode)}</pre>
     </section>
   );
 }
@@ -2757,7 +2839,10 @@ function TokenVisualizationCanvas({
           const selectedDirectly = selectedTokenSet.has(node.id);
           const selectedTarget = selectedTargetSet.has(node.id);
           const localNeighbor = localFocusIds.has(node.id) && !selectedDirectly;
-          const lowPriority = !hasFocus && node.type === "code_token" && !node.conceptIds.length;
+          // Line Tokens is an inspection scope, not a global overview. Every
+          // token on the selected line must remain equally readable; only the
+          // label layout may suppress overlapping annotations.
+          const lowPriority = canvasScope !== "line" && !hasFocus && node.type === "code_token" && !node.conceptIds.length;
           const tokenFocus = selectedTokenIds.length > 0;
           const point = pointFor(node);
           const isDragging = Boolean(nodeDragRef.current?.node.id === node.id);
@@ -2768,8 +2853,10 @@ function TokenVisualizationCanvas({
           const recommendedSuggestion = showRecommendedTokens && canvasScope === "line" && node.type === "code_token" && recommendationByCodeToken.has(node.tokenIndex);
           const dragLinkedSuggestion = (canvasScope === "line" || canvasScope === "all") && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
           const motionRelevant = draggedTrailIds.has(node.id) || followerTrailIds.has(node.id) || dragColorsByNode.has(node.id) || externallyImpacted;
-          const dimmed = (hasFocus && !active && !motionRelevant) || lowPriority;
-          const nodeOpacity = selectedDirectly || selectedTarget
+          const dimmed = canvasScope !== "line" && ((hasFocus && !active && !motionRelevant) || lowPriority);
+          const nodeOpacity = canvasScope === "line"
+            ? 1
+            : selectedDirectly || selectedTarget
             ? 1
             : localNeighbor
               ? 0.66 + zoomEmphasis * 0.22
@@ -2799,7 +2886,7 @@ function TokenVisualizationCanvas({
                 onNode(node);
               }}
               className={`${active ? "graph-node active" : "graph-node"}${dimmed ? " dimmed" : ""}${signal ? ` neighbor-${signal.status}` : ""}${node.id === focusId ? " focus-node" : ""}${localNeighbor ? " local-neighbor" : ""}${isDragging ? " dragging" : ""}${isDraggedMarker ? " dragged-marker" : ""}${isFollowerMarker ? " follower-marker" : ""}`}
-              style={{ opacity: tokenFocus || zoom > 1.4 ? nodeOpacity : undefined }}
+              style={{ opacity: canvasScope === "line" || tokenFocus || zoom > 1.4 ? nodeOpacity : undefined }}
             >
               {externallyImpacted ? (
                 <circle
@@ -2919,22 +3006,97 @@ function TokenVisualizationCanvas({
   );
 }
 
+function TaskBriefPanel({ brief, onConfirm, onClose, ready = true }: { brief: TaskBrief; onConfirm: () => void; onClose?: () => void; ready?: boolean }) {
+  const [acknowledged, setAcknowledged] = useState(false);
+  return <section className="panel task-brief-panel">
+    <div className="generation-header">
+      <div><div className="panel-title">Task Brief</div><p>{brief.role}</p></div>
+      {onClose ? <button onClick={onClose}>Close</button> : null}
+    </div>
+    {brief.sections?.length ? brief.sections.map((section) => <section key={section.heading}>
+      <h3>{section.heading}</h3>
+      {section.paragraphs?.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+      {section.codeBlocks?.map((block) => <pre key={block.content} className="task-brief-code"><code>{block.content}</code></pre>)}
+      {section.bullets?.length ? <ul className="task-brief-bullets">{section.bullets.map((item) => <li key={item}>{item}</li>)}</ul> : null}
+    </section>) : <>
+      <section><h3>系统背景</h3><p>{brief.systemContext}</p></section>
+      <section><h3>领域对象</h3><div className="task-brief-objects">{brief.domainObjects.map((item) => <div key={item.name}><strong>{item.name}</strong><span>{item.description}</span></div>)}</div></section>
+      <section><h3>需要理解的信息</h3><ol>{brief.essentialDomainKnowledge.map((item) => <li key={item}>{item}</li>)}</ol></section>
+      <section><h3>当前 Query</h3><p className="task-brief-query">{brief.taskQuery}</p></section>
+      <section><h3>Reference 选择</h3><p>{brief.referenceSelectionInstruction}</p></section>
+    </>}
+    {!onClose ? <label className="task-brief-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> 我已阅读任务背景，并理解需要选择一个最有助于后续生成的 Reference。</label> : null}
+    {!onClose ? <button className={`task-brief-enter ${acknowledged && ready ? "ready" : ""}`} onClick={onConfirm} disabled={!acknowledged || !ready}>{ready ? acknowledged ? "进入任务" : "确认理解后进入任务" : "正在准备检索工作区..."}</button> : null}
+  </section>;
+}
+
+function ParticipantGate({ condition, onStart }: { condition: "baseline" | "irag"; onStart: (participantId: string) => Promise<void> }) {
+  const [participantId, setParticipantId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function submit() {
+    setSubmitting(true); setError(null);
+    try { await onStart(participantId); } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setSubmitting(false); }
+  }
+  return <main className="participant-gate"><section className="panel"><div className="panel-title">Interactive RAG Study</div><p>Enter your assigned anonymous participant ID to begin.</p><label>Participant ID<input value={participantId} onChange={(event) => setParticipantId(event.target.value)} maxLength={64} autoFocus /></label>{error ? <div className="error">{error}</div> : null}<button className="primary" onClick={submit} disabled={submitting || !participantId.trim()}>{submitting ? "Starting..." : `Start ${condition === "irag" ? "IRAG" : "Baseline"}`}</button></section></main>;
+}
+
+function PostTaskMeasures({ onSubmit }: { onSubmit: (confidence: number, difficulty: number, reason: string) => Promise<void> }) {
+  const [confidence, setConfidence] = useState(4);
+  const [difficulty, setDifficulty] = useState(4);
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function submit() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit(confidence, difficulty, reason);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSubmitting(false);
+    }
+  }
+  return <section className="generation-reference-analysis post-task-measures"><div className="panel-title">Task questionnaire</div><label>How confident are you that this reference will help complete the task? <small>1 = not confident at all; 7 = extremely confident</small><select value={confidence} onChange={(event) => setConfidence(Number(event.target.value))} disabled={submitting}>{[1, 2, 3, 4, 5, 6, 7].map((value) => <option key={value} value={value}>{value}</option>)}</select></label><label>How difficult was it to select a useful reference? <small>1 = not difficult at all; 7 = extremely difficult</small><select value={difficulty} onChange={(event) => setDifficulty(Number(event.target.value))} disabled={submitting}>{[1, 2, 3, 4, 5, 6, 7].map((value) => <option key={value} value={value}>{value}</option>)}</select></label><label>What was the main reason for your selection? <textarea value={reason} onChange={(event) => setReason(event.target.value)} disabled={submitting} /></label>{error ? <div className="error">{error}</div> : null}<button className="primary" onClick={submit} disabled={submitting}>{submitting ? "Submitting..." : "Submit response"}</button></section>;
+}
+
 function GenerationPanel({
   confirmation,
   result,
+  comparison,
   evaluation,
   loading,
+  showInternal,
+  hint,
+  hintLoading,
+  onHint,
+  showMeasures,
+  onSubmitMeasures,
   onGenerate,
   onEvaluate,
-  onBack
+  onBack,
+  finalized,
+  onFinalize,
+  showFinalization
 }: {
   confirmation: GenerationConfirmation;
   result: GenerationResult | null;
+  comparison: GenerationComparison | null;
   evaluation: GenerationEvaluation | null;
   loading: boolean;
-  onGenerate: () => void;
+  showInternal: boolean;
+  hint: ReferenceHint | null;
+  hintLoading: boolean;
+  onHint: () => void;
+  showMeasures: boolean;
+  onSubmitMeasures: (confidence: number, difficulty: number, reason: string) => Promise<void>;
+  onGenerate: (condition: "no_rag" | "interactive_rag") => void;
   onEvaluate: () => void;
   onBack: () => void;
+  finalized: boolean;
+  onFinalize: () => void;
+  showFinalization: boolean;
 }) {
   const { task, selection } = confirmation;
   return (
@@ -2943,8 +3105,9 @@ function GenerationPanel({
         <div>
           <div className="panel-title">Generate From Selected Reference</div>
           <p>{task.query}</p>
+          {task.functionSignature ? <pre className="generation-signature">{task.functionSignature}</pre> : null}
         </div>
-        <button onClick={onBack}>Back to Retrieval</button>
+        {!finalized ? <button onClick={onBack}>Back to Retrieval</button> : null}
       </div>
       <div className="generation-context">
         <div className="panel-title">Selected Reference</div>
@@ -2955,27 +3118,64 @@ function GenerationPanel({
         </div>
         <details open>
           <summary>View selected retrieved code</summary>
-          <pre className="generation-context-code">{selection.candidate.rawCode}</pre>
+          <pre className="generation-context-code">{withoutLeadingFunctionDocstring(selection.candidate.rawCode)}</pre>
         </details>
       </div>
+      <section className="generation-reference-analysis" aria-label="Reference hint">
+        {!hint ? <><div className="panel-title">Need help understanding this reference?</div><button onClick={onHint} disabled={hintLoading}>{hintLoading ? "Loading hint..." : "Show Hint"}</button></> : <><div className="panel-title">Reference Hint</div><div className="reference-hint"><strong>What it does</strong><p>{hint.whatItDoes}</p><strong>Useful clue</strong><p>{hint.usefulClue}</p></div></>}
+      </section>
       <div className="generation-actions">
-        <button className="primary" onClick={onGenerate} disabled={loading}>{loading ? <Loader2 size={16} className="spin" /> : <CirclePlay size={16} />} Generate Code</button>
-        {result ? <button onClick={onEvaluate} disabled={loading}>Run Hidden Tests</button> : null}
+        <button className="primary" onClick={() => onGenerate("interactive_rag")} disabled={loading}>{loading ? <Loader2 size={16} className="spin" /> : <CirclePlay size={16} />} Generate With Selected Reference</button>
+        {showInternal ? <button onClick={() => onGenerate("no_rag")} disabled={loading}>Generate Without Reference</button> : null}
+        {showInternal && result && task.evaluationAvailable ? <button onClick={onEvaluate} disabled={loading}>Re-run Evaluation</button> : null}
+        {showFinalization && (!finalized ? <button onClick={onFinalize} disabled={loading}>Confirm Reference</button> : <span className="generation-finalized">Reference confirmed for this task.</span>)}
       </div>
       {result ? <div className="generation-output">
-        <div className="panel-title">Generated Code</div>
-        <div className="generation-result-meta">{result.model} · {result.promptVersion} · {result.generationTime.toFixed(2)}s</div>
-        <pre>{result.generatedCode}</pre>
+        <div className="panel-title">Generation Result</div>
+        <div className="generation-result-meta">{result.condition === "no_rag" ? "No retrieval context" : "Selected reference context"} · {result.curatedGeneration ? "Curated representative 5-run result" : "Live generation"} · {result.model} · {result.promptVersion} · {result.generationTime.toFixed(2)}s</div>
+        {showInternal && comparison ? <div className="generation-comparison">
+          <section>
+            <div className="comparison-title">Generated Code</div>
+            <pre>{comparison.generatedCode}</pre>
+          </section>
+          <section>
+            <div className="comparison-title">Hidden Ground-Truth Implementation</div>
+            <div className="comparison-meta">{comparison.groundTruth.functionName || comparison.groundTruth.candidateId} · {comparison.groundTruth.path}</div>
+            <pre>{comparison.groundTruth.rawCode}</pre>
+          </section>
+        </div> : <pre>{result.generatedCode}</pre>}
       </div> : null}
-      {evaluation ? <div className={`generation-evaluation ${evaluation.status}`}>
+      {showInternal && evaluation ? <div className={`generation-evaluation ${evaluation.status}`}>
         <div className="panel-title">Evaluation</div>
-        {evaluation.status === "ok" ? <strong>Tests Passed: {evaluation.testsPassed} / {evaluation.testsTotal} · Functional Correctness: {Math.round((evaluation.passRate ?? 0) * 100)}%</strong> : <span>{evaluation.message}</span>}
+        <div className="evaluation-summary">
+          {evaluation.status === "ok" ? <strong>Functional tests: {evaluation.testsPassed} / {evaluation.testsTotal} passed · {Math.round((evaluation.passRate ?? 0) * 100)}%</strong> : <span>Functional tests: unavailable on this server. {evaluation.message}</span>}
+        </div>
+        {evaluation.apiPrecision != null && evaluation.apiRecall != null ? <div className="evaluation-metrics">
+          <div><span>API precision</span><strong>{(evaluation.apiPrecision * 100).toFixed(1)}%</strong></div>
+          <div><span>API recall</span><strong>{(evaluation.apiRecall * 100).toFixed(1)}%</strong></div>
+          <div><span>API F1</span><strong>{((evaluation.apiF1 ?? 0) * 100).toFixed(1)}%</strong></div>
+        </div> : null}
+        {evaluation.generatedApis?.length || evaluation.groundTruthApis?.length ? <div className="evaluation-api-sets">
+          <span>Generated APIs: {evaluation.generatedApis?.join(", ") || "none"}</span>
+          <span>GT APIs: {evaluation.groundTruthApis?.join(", ") || "none"}</span>
+        </div> : null}
+        {evaluation.testResults?.length ? <div className="evaluation-tests">
+          {evaluation.testResults.map((test) => <div key={test.name} className={test.passed ? "evaluation-test passed" : "evaluation-test failed"}>
+            <strong>{test.passed ? "Pass" : "Fail"}</strong><span>{test.name}</span>{test.error ? <small>{test.error}</small> : null}
+          </div>)}
+        </div> : null}
+        {evaluation.matchedApis?.length ? <div className="evaluation-api-match">Matched APIs: {evaluation.matchedApis.join(", ")}</div> : null}
       </div> : null}
+      {showMeasures && finalized ? <PostTaskMeasures onSubmit={onSubmitMeasures} /> : null}
     </section>
   );
 }
 
 function App() {
+  const appMode = APP_MODE;
+  const isBaseline = appMode === "baseline";
+  const isDemo = appMode === "demo";
+  const studyCondition = isBaseline ? "baseline" : "irag";
   const [tests, setTests] = useState<string[]>([]);
   const [testId, setTestId] = useState(DEFAULT_TEST_ID);
   const [modelId, setModelId] = useState("xsearch");
@@ -3015,6 +3215,14 @@ function App() {
   const [selectedDragMatchKey, setSelectedDragMatchKey] = useState<string | null>(null);
   const [selectedExternalImpactKey, setSelectedExternalImpactKey] = useState<string | null>(null);
   const [resetVersion, setResetVersion] = useState(0);
+
+  useEffect(() => {
+    document.title = appMode === "study"
+      ? "Interactive RAG User Study"
+      : appMode === "baseline"
+        ? "Interactive RAG Baseline"
+        : "Interactive RAG";
+  }, [appMode]);
   const [neighborSignals, setNeighborSignals] = useState<Record<string, NeighborSignal>>({});
   const [exitedNeighbors, setExitedNeighbors] = useState<string[]>([]);
   const previousNeighborsRef = useRef<Record<string, { label: string; distance: number }> | null>(null);
@@ -3034,13 +3242,42 @@ function App() {
   const [generationMode, setGenerationMode] = useState(false);
   const [generationConfirmation, setGenerationConfirmation] = useState<GenerationConfirmation | null>(null);
   const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
+  const [generationComparison, setGenerationComparison] = useState<GenerationComparison | null>(null);
   const [generationEvaluation, setGenerationEvaluation] = useState<GenerationEvaluation | null>(null);
   const [generationLoading, setGenerationLoading] = useState(false);
+  const [referenceFinalized, setReferenceFinalized] = useState(false);
+  const [confirmReferenceOpen, setConfirmReferenceOpen] = useState(false);
+  const [postTaskMeasuresOpen, setPostTaskMeasuresOpen] = useState(false);
+  const [studySession, setStudySession] = useState<StudySession | null>(null);
+  const [caseAttemptId, setCaseAttemptId] = useState<string | null>(null);
+  const [taskBrief, setTaskBrief] = useState<TaskBrief | null>(null);
+  const [briefConfirmed, setBriefConfirmed] = useState(true);
+  const [briefWorkspaceReady, setBriefWorkspaceReady] = useState(false);
+  const [briefOpen, setBriefOpen] = useState(false);
+  const [referenceHint, setReferenceHint] = useState<ReferenceHint | null>(null);
+  const [hintLoading, setHintLoading] = useState(false);
+  const hintOpenedAtRef = useRef<number | null>(null);
   const loadRequestRef = useRef(0);
+
+  useEffect(() => {
+    if (isDemo) return;
+    const raw = window.sessionStorage.getItem(`irag-study-session-${appMode}`);
+    if (!raw) return;
+    try {
+      const restored = JSON.parse(raw) as StudySession;
+      setStudySession(restored);
+      setEventContext(restored);
+    } catch { window.sessionStorage.removeItem(`irag-study-session-${appMode}`); }
+  }, [appMode, isDemo]);
 
   useEffect(() => {
     getExperiments()
       .then((data) => {
+        if (!isDemo) {
+          setTests(["csn_11772"]);
+          if (testId !== "csn_11772") setTestId("csn_11772");
+          return;
+        }
         const focused = FOCUS_TEST_IDS.filter((id) => data.tests.includes(id));
         const visibleTests = focused.length ? focused : data.tests;
         setTests(visibleTests);
@@ -3061,6 +3298,15 @@ function App() {
     graphCacheRef.current = {};
     candidateRequestCacheRef.current = {};
     graphRequestCacheRef.current = {};
+  }
+
+  function invalidateCandidatePayload(nextTestId: string, candidateId: string) {
+    const detailKey = payloadCacheKey(nextTestId, candidateId);
+    const graphKey = payloadCacheKey(nextTestId, candidateId, 4);
+    delete candidateDetailCacheRef.current[detailKey];
+    delete graphCacheRef.current[graphKey];
+    delete candidateRequestCacheRef.current[detailKey];
+    delete graphRequestCacheRef.current[graphKey];
   }
 
   function payloadCacheKey(nextTestId: string, candidateId: string, epoch = 4) {
@@ -3106,12 +3352,12 @@ function App() {
       ...payload.candidates.filter((item) => item.isGroundTruth && item.id !== firstCandidateId),
       ...payload.candidates.filter((item) => !item.isGroundTruth && item.id !== firstCandidateId)
     ];
-    for (const item of ordered) {
+    for (const [index, item] of ordered.entries()) {
       if (generation !== cacheGenerationRef.current) return;
       try {
         await getCandidateDetail(payload.testId, item.id);
         if (generation !== cacheGenerationRef.current) return;
-        await getVisualizationGraph(payload.testId, item.id);
+        if (index < PREFETCH_GRAPH_LIMIT) await getVisualizationGraph(payload.testId, item.id);
       } catch {
         // A failed background preload must not block the interactive session.
       }
@@ -3132,10 +3378,32 @@ function App() {
     setGenerationMode(false);
     setGenerationConfirmation(null);
     setGenerationResult(null);
+    setGenerationComparison(null);
     setGenerationEvaluation(null);
+    setReferenceFinalized(false);
+    setConfirmReferenceOpen(false);
+    setPostTaskMeasuresOpen(false);
+    setReferenceHint(null);
+    setTaskBrief(null);
+    setBriefConfirmed(true);
+    setBriefWorkspaceReady(false);
+    setBriefOpen(false);
+    const attemptId = createClientId("attempt");
+    setCaseAttemptId(attemptId);
+    setEventContext({ ...(studySession ?? {}), caseAttemptId: attemptId });
     try {
-      setLoadingStep(`Loading Rank 1 ${nextTestId}`);
-      const bootstrap = await loadSessionBootstrap(nextTestId, modelId);
+      setLoadingStep(`Loading task brief for ${nextTestId}`);
+      const briefRequest = loadTaskBrief(nextTestId).catch(() => null);
+      const bootstrapRequest = loadSessionBootstrap(nextTestId, modelId);
+      const brief = await briefRequest;
+      if (requestId !== loadRequestRef.current) return;
+      if (brief) {
+        setTaskBrief(brief);
+        setBriefConfirmed(false);
+        logEvent("scenario_open", { testId: nextTestId, scenarioVersion: brief.version });
+      }
+      setLoadingStep(`Preparing retrieval workspace for ${nextTestId}`);
+      const bootstrap = await bootstrapRequest;
       if (requestId !== loadRequestRef.current) return;
       const loaded = bootstrap.session;
       setSession(loaded);
@@ -3146,6 +3414,7 @@ function App() {
       graphCacheRef.current[payloadCacheKey(nextTestId, first.id)] = bootstrap.graph;
       setCandidate(bootstrap.candidate);
       setGraph(bootstrap.graph);
+      setBriefWorkspaceReady(true);
       setAdjudicationIds([]);
       setAdjudicationMode(false);
       setAdjudicationCandidates({});
@@ -3176,7 +3445,7 @@ function App() {
       previousNeighborsRef.current = null;
       setLoading(false);
       setLoadingStep(null);
-      logEvent("test_load", { testId: nextTestId, candidateId: first.id });
+      logEvent("task_start", { testId: nextTestId, candidateId: first.id, retrievalModel: modelId });
       void prefetchRankedCandidates(loaded, first.id, cacheGeneration);
     } catch (err) {
       setError(isUnavailableTokenError(err) ? null : err instanceof Error ? err.message : String(err));
@@ -3187,15 +3456,18 @@ function App() {
   }
 
   async function selectCandidate(next: CandidateSummary) {
-    if (!session || retrievalLocked) return;
+    if (!session || retrievalLocked || !briefConfirmed) return;
+    if (candidate) logEvent("candidate_close", { testId: session.testId, candidateId: candidate.id });
     const requestId = ++loadRequestRef.current;
     setLoading(true);
     setGraphLoading(false);
     setError(null);
     setGraph(null);
     try {
-      const detail = await getCandidateDetail(session.testId, next.id);
-      const nextGraph = await getVisualizationGraph(session.testId, next.id);
+      const [detail, nextGraph] = await Promise.all([
+        getCandidateDetail(session.testId, next.id),
+        getVisualizationGraph(session.testId, next.id)
+      ]);
       if (requestId !== loadRequestRef.current) return;
       setCandidate(detail);
       setGraph(nextGraph);
@@ -3222,7 +3494,8 @@ function App() {
       previousNeighborsRef.current = null;
       setLoading(false);
       setLoadingStep(null);
-      logEvent("candidate_select", { testId: session.testId, candidateId: next.id });
+      logEvent("candidate_switch", { testId: session.testId, candidateId: next.id, initialRank: next.originalRank ?? next.rank, currentRank: next.rank, retrievalScore: next.similarity });
+      logEvent("candidate_open", { testId: session.testId, candidateId: next.id, initialRank: next.originalRank ?? next.rank, currentRank: next.rank, retrievalScore: next.similarity });
     } catch (err) {
       setError(isUnavailableTokenError(err) ? null : err instanceof Error ? err.message : String(err));
       if (requestId === loadRequestRef.current) setLoadingStep(null);
@@ -3567,9 +3840,11 @@ function App() {
           lineMatches: localLineMatches
         }
       }));
-      resetPayloadCaches();
-      const detail = await getCandidateDetail(session.testId, candidate.id);
-      const nextGraph = await getVisualizationGraph(session.testId, candidate.id);
+      invalidateCandidatePayload(session.testId, candidate.id);
+      const [detail, nextGraph] = await Promise.all([
+        getCandidateDetail(session.testId, candidate.id),
+        getVisualizationGraph(session.testId, candidate.id)
+      ]);
       setCandidate(detail);
       setGraph(nextGraph);
       logEvent("projection_drag_drop", {
@@ -3610,17 +3885,24 @@ function App() {
         selectedRank: summary?.rank ?? null,
         selectedScore: summary?.similarity ?? candidate.similarity,
         interactionUsed,
-        model: modelId
+        model: modelId,
+        appMode,
+        sessionId: studySession?.sessionId,
+        participantId: studySession?.participantId,
+        caseAttemptId: caseAttemptId ?? undefined
       });
       setGenerationConfirmation(confirmation);
-      setRetrievalLocked(true);
+      setReferenceFinalized(false);
+      setConfirmReferenceOpen(false);
       setGenerationResult(null);
+      setGenerationComparison(null);
       setGenerationEvaluation(null);
+      setReferenceHint(null);
       setGenerationMode(true);
       setDragMode(false);
       setLinkMode(false);
       setAdjudicationMode(false);
-      logEvent("reference_confirmed_for_generation", { testId: session.testId, candidateId: candidate.id, selectedRank: summary?.rank, interactionUsed });
+      logEvent("reference_preview", { testId: session.testId, candidateId: candidate.id, selectedRank: summary?.rank, interactionUsed });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -3628,24 +3910,108 @@ function App() {
     }
   }
 
-  async function runGeneration() {
-    if (!generationConfirmation) return;
+  async function finalizeReferenceForTask() {
+    if (!generationConfirmation || referenceFinalized) return;
     setGenerationLoading(true);
     setError(null);
-    setGenerationEvaluation(null);
     try {
-      const result = await generateCode({
-        caseId: generationConfirmation.task.caseId,
-        selectionId: generationConfirmation.selectionId,
-        condition: "interactive_rag"
-      });
-      setGenerationResult(result);
-      logEvent("generation_complete", { caseId: result.caseId, condition: result.condition, contextCandidateId: result.contextCandidateId, generationId: result.generationId });
+      const confirmation = await finalizeReference(generationConfirmation.selectionId);
+      setGenerationConfirmation(confirmation);
+      setReferenceFinalized(true);
+      setRetrievalLocked(true);
+      setConfirmReferenceOpen(false);
+      setGenerationResult(null);
+      setGenerationComparison(null);
+      setGenerationEvaluation(null);
+      const selected = confirmation.selection;
+      await logEvent("candidate_close", { testId: confirmation.task.caseId, candidateId: selected.selectedCandidateId, reason: "reference_finalized" });
+      await logEvent("reference_confirm", { testId: confirmation.task.caseId, candidateId: selected.selectedCandidateId, selectedRank: selected.selectedRank, interactionUsed: selected.interactionUsed, selectionId: confirmation.selectionId });
+      if (!isDemo) setPostTaskMeasuresOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setGenerationLoading(false);
     }
+  }
+
+  async function runGeneration(condition: "no_rag" | "interactive_rag") {
+    if (!generationConfirmation) return;
+    setGenerationLoading(true);
+    setError(null);
+    setGenerationComparison(null);
+    setGenerationEvaluation(null);
+    try {
+      const result = await generateCode({
+        caseId: generationConfirmation.task.caseId,
+        selectionId: generationConfirmation.selectionId,
+        condition
+      });
+      setGenerationResult(result);
+      if (isDemo) {
+        const [comparison, evaluation] = await Promise.all([loadGenerationComparison(result.generationId), evaluateGeneration(result.generationId)]);
+        setGenerationComparison(comparison);
+        setGenerationEvaluation(evaluation);
+        logEvent("evaluation_complete", { caseId: result.caseId, generationId: result.generationId, status: evaluation.status, passRate: evaluation.passRate });
+      }
+      logEvent("generation_end", { caseId: result.caseId, condition: result.condition, contextCandidateId: result.contextCandidateId, generationId: result.generationId });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerationLoading(false);
+    }
+  }
+
+  async function showReferenceHint() {
+    if (!generationConfirmation || referenceHint) return;
+    setHintLoading(true);
+    try {
+      const hint = await loadReferenceHint(generationConfirmation.selectionId);
+      setReferenceHint(hint);
+      hintOpenedAtRef.current = Date.now();
+      logEvent("hint_opened", { caseId: generationConfirmation.task.caseId, selectionId: generationConfirmation.selectionId });
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setHintLoading(false); }
+  }
+
+  function confirmTaskBrief() {
+    if (!taskBrief || !session) return;
+    setBriefConfirmed(true);
+    logEvent("scenario_confirm", { testId: session.testId, scenarioVersion: taskBrief.version });
+  }
+
+  async function startParticipant(participantId: string) {
+    const created = await startStudySession(participantId, studyCondition);
+    setStudySession(created);
+    setEventContext(created);
+    window.sessionStorage.setItem(`irag-study-session-${appMode}`, JSON.stringify(created));
+    logEvent("study_session_start", { condition: created.condition });
+  }
+
+  function changeParticipant() {
+    if (studySession) logEvent("session_end", { participantId: studySession.participantId });
+    window.sessionStorage.removeItem(`irag-study-session-${appMode}`);
+    setEventContext({});
+    setStudySession(null);
+    setSession(null);
+    setCandidate(null);
+    setGraph(null);
+    setCandidates([]);
+    setTaskBrief(null);
+    setBriefConfirmed(true);
+    setPostTaskMeasuresOpen(false);
+  }
+
+  async function submitPostTaskMeasures(confidence: number, difficulty: number, reason: string) {
+    if (!generationConfirmation) return;
+    const context = { caseId: generationConfirmation.task.caseId, selectionId: generationConfirmation.selectionId };
+    await logEvent("confidence_submit", { ...context, confidence });
+    await logEvent("difficulty_submit", { ...context, difficulty });
+    if (hintOpenedAtRef.current) {
+      await logEvent("hint_closed", { ...context, hintDwellTime: Math.round((Date.now() - hintOpenedAtRef.current) / 1000) });
+      hintOpenedAtRef.current = null;
+    }
+    await logEvent("task_end", { ...context, selectionReason: reason });
+    setPostTaskMeasuresOpen(false);
   }
 
   async function runGenerationEvaluation() {
@@ -3664,6 +4030,7 @@ function App() {
   }
 
   function changeModel(nextModelId: string) {
+    if (!isDemo) return;
     if (nextModelId === modelId) return;
     setModelId(nextModelId);
     resetPayloadCaches();
@@ -3678,7 +4045,10 @@ function App() {
     setGenerationMode(false);
     setGenerationConfirmation(null);
     setGenerationResult(null);
+    setGenerationComparison(null);
     setGenerationEvaluation(null);
+    setReferenceFinalized(false);
+    setPostTaskMeasuresOpen(false);
     setError(null);
     if (nextModelId === "codebert" && !testId.startsWith("csn_")) setTestId("csn_11087");
   }
@@ -3859,25 +4229,31 @@ function App() {
     }
   }
 
+  if (!isDemo && !studySession) return <ParticipantGate condition={studyCondition} onStart={startParticipant} />;
+
+  if (taskBrief && !briefConfirmed) return <div className={`app-shell app-mode-${appMode} task-brief-stage`}><header className="topbar"><h1>{appMode === "study" ? "Interactive RAG User Study" : appMode === "baseline" ? "Interactive RAG Baseline" : "Interactive RAG"}</h1>{!isDemo ? <button onClick={changeParticipant}>Change participant</button> : null}</header><TaskBriefPanel brief={taskBrief} onConfirm={confirmTaskBrief} ready={briefWorkspaceReady} /></div>;
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell app-mode-${appMode}`}>
       <header className="topbar">
         <div>
-          <h1>Interactive ConceptLens Retrieval</h1>
+          <h1>{appMode === "study" ? "Interactive RAG User Study" : appMode === "baseline" ? "Interactive RAG Baseline" : "Interactive RAG"}</h1>
         </div>
         <div className="toolbar">
-          <label className="model-selector">
+          {isDemo ? <label className="model-selector">
             <span>Model</span>
             <select value={modelId} onChange={(event) => changeModel(event.target.value)} disabled={loading}>
               <option value="xsearch">XSearch</option>
               <option value="codebert">CodeBERT</option>
             </select>
-          </label>
+          </label> : null}
+          {!isDemo ? <button onClick={changeParticipant}>Change participant</button> : null}
+          {taskBrief ? <button onClick={() => setBriefOpen(true)}>Task Brief</button> : null}
           <select value={testId} onChange={(event) => setTestId(event.target.value)}>
             <option value="">Select an example</option>
             {tests.map((id) => (
               <option key={id} value={id}>
-              {id === "48" ? "48 · allowed extension alignment" : id === "1556" ? "1556 · reset system state" : id === "1642" ? "1642 · compact rerank demo" : id === "2695" ? "2695 · EM iteration" : id === "2797" ? "2797 · command-line argument recovery" : id === "2836" ? "2836 · parent override logging recovery" : id === "3856" ? "3856 · comparable dictionary" : id === "954" ? "954 · API decorator specificity" : id === "csn_9848" ? "9848 · configuration return type" : id === "csn_11087" ? "11087 · right-click position" : id === "csn_11078" ? "11078 · error message display" : id === "csn_9406" ? "9406 · device buffer write" : id === "csn_400" ? "400 · parse options and commands" : id === "csn_13958" ? "13958 · line-pair diagnosis" : id === "csn_13527" ? "13527 · command-line logging" : id === "csn_8838" ? "8838 · interned keyword API bridge" : id === "csn_2812" ? "2812 · qubit dimension log2 bridge" : id === "csn_7727" ? "7727 · Stokes calibration feed-type bridge" : id === "csn_4772" ? "4772 · KMIP DeviceCredential serialization bridge" : id === "csn_10023" ? "10023 · OSM replication state bridge" : id === "csn_2207" ? "2207 · window sum-square hop-length bridge" : id === "csn_5340" ? "5340 · GeoTiff VLR API bridge" : id === "csn_10164" ? "10164 · V4 meter request bridge" : id === "csn_13655" ? "13655 · application logging bridge" : id === "csn_14175" ? "14175 · notebook format bridge" : id === "csn_10643" ? "10643 · root logger bridge" : id === "csn_12075" ? "12075 · current tags API bridge" : `test ${id}`}
+              {id === "48" ? "48 · allowed extension alignment" : id === "1556" ? "1556 · reset system state" : id === "1642" ? "1642 · compact rerank demo" : id === "2695" ? "2695 · EM iteration" : id === "2797" ? "2797 · command-line argument recovery" : id === "2836" ? "2836 · parent override logging recovery" : id === "3856" ? "3856 · comparable dictionary" : id === "954" ? "954 · API decorator specificity" : id === "csn_9848" ? "9848 · configuration return type" : id === "csn_11087" ? "11087 · right-click position" : id === "csn_11078" ? "11078 · error message display" : id === "csn_9406" ? "9406 · device buffer write" : id === "csn_400" ? "400 · parse options and commands" : id === "csn_13958" ? "13958 · line-pair diagnosis" : id === "csn_13527" ? "13527 · command-line logging" : id === "csn_8838" ? "8838 · interned keyword API bridge" : id === "csn_11772" ? "11772 · asset MIME-type extension bridge" : id === "csn_2812" ? "2812 · qubit dimension log2 bridge" : id === "csn_7727" ? "7727 · Stokes calibration feed-type bridge" : id === "csn_4772" ? "4772 · KMIP DeviceCredential serialization bridge" : id === "csn_10023" ? "10023 · OSM replication state bridge" : id === "csn_2207" ? "2207 · window sum-square hop-length bridge" : id === "csn_5340" ? "5340 · GeoTiff VLR API bridge" : id === "csn_10164" ? "10164 · V4 meter request bridge" : id === "csn_13655" ? "13655 · application logging bridge" : id === "csn_14175" ? "14175 · notebook format bridge" : id === "csn_10643" ? "10643 · root logger bridge" : id === "csn_12075" ? "12075 · current tags API bridge" : `test ${id}`}
               </option>
             ))}
           </select>
@@ -3885,17 +4261,17 @@ function App() {
             {loading ? <Loader2 size={16} className="spin" /> : <CirclePlay size={16} />}
             Load
           </button>
-          <button onClick={resetView} disabled={!graph || loading}>
+          {!isBaseline ? <button onClick={resetView} disabled={!graph || loading}>
             <RefreshCw size={16} />
-          </button>
-          <button
+          </button> : null}
+          {!isBaseline ? <button
             onClick={() => setFocusPaneOrder((value) => value === "graph-first" ? "code-first" : "graph-first")}
             title="交换 embedding space 和代码面板位置"
           >
             <ArrowLeftRight size={16} />
             Swap
-          </button>
-          <button
+          </button> : null}
+          {!isBaseline ? <button
             className={dragMode ? "active-tool" : ""}
             onClick={toggleDragMode}
             disabled={!graph || !supportsIntervention || retrievalLocked}
@@ -3903,8 +4279,8 @@ function App() {
           >
             <Move size={16} />
             Drag
-          </button>
-          <button
+          </button> : null}
+          {!isBaseline ? <button
             className={adjudicationMode ? "active-tool" : ""}
             onClick={toggleAdjudicationMode}
             disabled={!session || retrievalLocked}
@@ -3912,12 +4288,12 @@ function App() {
           >
             <ArrowLeftRight size={16} />
             Adjudicate
-          </button>
+          </button> : null}
           <button
             className={generationMode ? "active-tool" : ""}
             onClick={generationMode ? () => setGenerationMode(false) : confirmReferenceForGeneration}
-            disabled={generationLoading || (!generationMode && (!session || !candidate || modelId !== "xsearch" || !session.referenceSelection?.enabled || !GENERATION_CASE_IDS.has(session.testId)))}
-            title={generationMode ? "Return to the locked retrieval workspace" : modelId !== "xsearch" ? "Generation validation currently uses locked XSearch reference evidence." : "Lock the selected reference before generation"}
+            disabled={generationLoading || retrievalLocked || (!generationMode && (!session || !candidate || modelId !== "xsearch" || !session.referenceSelection?.enabled || !GENERATION_CASE_IDS.has(session.testId)))}
+            title={generationMode ? "Return to retrieval and compare another reference" : modelId !== "xsearch" ? "Generation validation currently uses XSearch reference evidence." : "Use the current reference for generation; final submission happens in Generation."}
           >
             <CirclePlay size={16} />
             {generationMode ? "Retrieval" : "Use as Reference"}
@@ -3927,8 +4303,30 @@ function App() {
 
       {loadingStep && <div className="meta-line">{loadingStep}</div>}
       {error && <div className="error">{error}</div>}
-      <div className="workspace">
-        <QueryPanel
+      {briefOpen && taskBrief ? <div className="task-brief-overlay"><TaskBriefPanel brief={taskBrief} onConfirm={() => undefined} onClose={() => setBriefOpen(false)} /></div> : null}
+      {confirmReferenceOpen && generationConfirmation ? <div className="reference-confirm-overlay" role="presentation">
+        <section className="reference-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="reference-confirm-title">
+          <div className="panel-title" id="reference-confirm-title">Confirm Reference Selection</div>
+          <p>You are about to submit this reference as your final choice for this task.</p>
+          <div className="reference-confirm-summary">
+            <strong>{generationConfirmation.selection.candidate.metadata.funcName || generationConfirmation.selection.selectedCandidateId}</strong>
+            <span>Rank {generationConfirmation.selection.selectedRank ?? "-"} · score {generationConfirmation.selection.selectedScore?.toFixed(3) ?? "-"}</span>
+          </div>
+          <p className="reference-confirm-note">After confirmation, this task's reference selection is locked and cannot be changed.</p>
+          <div className="reference-confirm-actions">
+            <button onClick={() => setConfirmReferenceOpen(false)} disabled={generationLoading}>Cancel</button>
+            <button className="primary" onClick={finalizeReferenceForTask} disabled={generationLoading}>{generationLoading ? "Submitting..." : "Confirm and Submit"}</button>
+          </div>
+        </section>
+      </div> : null}
+      {postTaskMeasuresOpen && generationConfirmation ? <div className="reference-confirm-overlay" role="presentation">
+        <section className="reference-confirm-dialog post-task-measures-dialog" role="dialog" aria-modal="true" aria-labelledby="post-task-measures-title">
+          <p id="post-task-measures-title">Your reference selection has been recorded. Please complete this short questionnaire to finish the task.</p>
+          <PostTaskMeasures onSubmit={submitPostTaskMeasures} />
+        </section>
+      </div> : null}
+      <div className={isBaseline ? "workspace baseline-workspace" : "workspace"}>
+        {isBaseline ? <BaselineQueryPanel session={session} /> : <QueryPanel
           session={session}
           candidate={candidate}
           selectedConcepts={selectedConcepts}
@@ -3942,26 +4340,51 @@ function App() {
           externalImpacts={currentExternalImpacts}
           selectedExternalImpactKey={selectedExternalImpactKey}
           onExternalImpact={selectExternalImpact}
-        />
-        <div className={adjudicationMode ? "main-workspace adjudicating" : "main-workspace"}>
+        />}
+        <div className={isBaseline ? "main-workspace baseline-main-workspace" : adjudicationMode ? "main-workspace adjudicating" : "main-workspace"}>
           {generationMode && generationConfirmation ? (
             <GenerationPanel
               confirmation={generationConfirmation}
               result={generationResult}
+              comparison={generationComparison}
               evaluation={generationEvaluation}
               loading={generationLoading}
               onGenerate={runGeneration}
               onEvaluate={runGenerationEvaluation}
+              showInternal={isDemo}
+              hint={referenceHint}
+              hintLoading={hintLoading}
+              onHint={showReferenceHint}
+              showMeasures={false}
+              onSubmitMeasures={submitPostTaskMeasures}
               onBack={() => setGenerationMode(false)}
+              finalized={referenceFinalized}
+              onFinalize={() => setConfirmReferenceOpen(true)}
+              showFinalization={!isDemo}
             />
           ) : (
-          <>
+          isBaseline ? (
+            <>
+              <BaselineCodeViewer candidate={candidate} displaySimilarity={currentCandidateSummary?.similarity} />
+              <CandidatePanel
+                candidates={candidates.length ? candidates : session?.candidates ?? []}
+                selectedId={candidate?.id ?? null}
+                onSelect={selectCandidate}
+                modelId={modelId}
+                showGroundTruth={false}
+                adjudicationIds={[]}
+                onAdjudicationToggle={() => undefined}
+              />
+            </>
+          ) : <>
           {adjudicationMode && session ? (
             <div className="adjudication-workspace">
               <CandidatePanel
                 candidates={candidates.length ? candidates : session.candidates}
                 selectedId={candidate?.id ?? null}
                 onSelect={selectCandidate}
+                modelId={modelId}
+                showGroundTruth={isDemo}
                 adjudicationMode
                 adjudicationIds={adjudicationIds}
                 onAdjudicationToggle={toggleAdjudicationCandidate}
@@ -3971,6 +4394,7 @@ function App() {
                   session={session}
                   candidates={adjudicationIds.map((id) => adjudicationCandidates[id]).filter((item): item is CandidateDetail => Boolean(item))}
                   summaries={Object.fromEntries((candidates.length ? candidates : session.candidates).map((item) => [item.id, item]))}
+                  showGroundTruth={isDemo}
                 />
               ) : (
                 <section className="panel adjudication-placeholder">Select two candidates from the ranked list to compare their line-level evidence.</section>
@@ -4084,6 +4508,8 @@ function App() {
             candidates={candidates.length ? candidates : session?.candidates ?? []}
             selectedId={candidate?.id ?? null}
             onSelect={selectCandidate}
+            modelId={modelId}
+            showGroundTruth={isDemo}
             adjudicationIds={adjudicationIds}
             onAdjudicationToggle={toggleAdjudicationCandidate}
           />
