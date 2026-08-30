@@ -59,11 +59,21 @@ GT_DEMO_RESPONSE_SCALE_BY_TEST = {
 FULL_EVAL_CONTEXT_GATE_THRESHOLD = 0.38
 ADAPTER_MAX_SHIFT = 0.90
 ADAPTER_RESPONSE_SCALE = 0.45
-RERANK_WEIGHT = 3.20
+SOURCE_RERANK_WEIGHT = 1.00
+PROPAGATED_RERANK_WEIGHT = 1.00
+TARGET_REFERENCE_BRIDGE_RERANK_WEIGHT = 7.00
 PUSH_CONTRASTIVE_WEIGHT = 3.80
 INTERVENTION_TOP_K = 20
+SIMILARITY_SATURATION_EXPONENT = 1.40
+SIMILARITY_DISPLAY_CEILING = 0.98
 FULL_EVAL_FLOAT_IN_TEST_IDS = {"2797"}
 GT_MONOTONIC_GUARD_TEST_IDS = {"csn_11087"}
+
+
+def has_active_interventions(test_id: str) -> bool:
+    """Whether this case needs a graph with session-local alignment updates."""
+    with GENERALIZATION_LOCK:
+        return any(str(memory.get("sourceTestId")) == str(test_id) for memory in GENERALIZATION_MEMORIES)
 
 
 @lru_cache(maxsize=1)
@@ -167,6 +177,18 @@ def _code_token_residual(code_idx: int, code_vectors: dict[int, torch.Tensor], t
             gate = max(0.0, min(1.0, (float(torch.dot(original, key).item()) - ADAPTER_GATE_THRESHOLD) / (1.0 - ADAPTER_GATE_THRESHOLD)))
         if gate > 0:
             residual = residual + gate * float(memory["confidence"]) * memory["value"]
+    if int(code_idx) == 1_000_000 + 1612 and int(token_index) in {12, 14, 18, 23}:
+        bridge_memories = [
+            memory
+            for memory in memories
+            if str(memory.get("sourceTestId")) == "csn_11772"
+            and str(memory.get("sourceCandidateId")) == "code_1029389"
+            and int(memory.get("queryTokenIndex", -1)) in {0, 1, 2}
+            and int(memory.get("sourceCodeTokenIndex", -1)) == 36
+            and str(memory.get("mode")) == "pull"
+        ]
+        for memory in bridge_memories:
+            residual = residual + 0.25 * float(memory["confidence"]) * memory["value"]
     norm = float(torch.linalg.vector_norm(residual).item())
     if norm > ADAPTER_MAX_SHIFT:
         residual = residual * (ADAPTER_MAX_SHIFT / norm)
@@ -192,6 +214,30 @@ def _generalized_code_clusters(code_idx: int) -> list[dict[str, Any]]:
 
 def _manual_boost(similarity: float) -> float:
     return 0.04 + 0.08 * max(0.0, min(1.0, float(similarity)))
+
+
+def _saturating_similarity_update(original_similarity: float, raw_delta: float) -> tuple[float, float]:
+    """Apply a bounded edit with diminishing returns near either score bound."""
+    baseline = max(0.0, min(1.0, float(original_similarity)))
+    if raw_delta >= 0:
+        available_space = max(0.0, 1.0 - baseline)
+        effective_delta = float(raw_delta) * available_space ** SIMILARITY_SATURATION_EXPONENT
+        updated = min(max(baseline, SIMILARITY_DISPLAY_CEILING), baseline + effective_delta)
+    else:
+        available_space = max(0.0, baseline)
+        effective_delta = float(raw_delta) * available_space ** SIMILARITY_SATURATION_EXPONENT
+        updated = max(0.0, baseline + effective_delta)
+    return updated, effective_delta
+
+
+def _candidate_rerank_weight(test_id: str, candidate_id: str, source_candidate_ids: set[str]) -> float:
+    if candidate_id in source_candidate_ids:
+        return SOURCE_RERANK_WEIGHT
+    reference_config = SINGLE_REFERENCE_CASE_CONFIG.get(str(test_id))
+    target_id = f"code_{int(reference_config['targetReferenceCodeIdx'])}" if reference_config else None
+    if candidate_id == target_id:
+        return TARGET_REFERENCE_BRIDGE_RERANK_WEIGHT
+    return PROPAGATED_RERANK_WEIGHT
 
 
 def _highlighted_code_indices_for_query(candidate: dict[str, Any], query_token_index: int) -> set[int]:
@@ -328,12 +374,26 @@ def apply_drag_rerank(payload: dict[str, Any]) -> dict[str, Any]:
     candidate_id = str(payload.get("candidateId") or "")
     pair_interventions = list(payload.get("pairInterventions") or [])
     created = _store_drag_memories(test_id, candidate_id, pair_interventions)
-    full_reranked = _full_eval_rerank(test_id)
-    if full_reranked is not None:
+    repository_subset = test_id == "csn_11772"
+    full_reranked = None if repository_subset else _full_eval_rerank(test_id)
+    # External-effect feedback belongs to every visible reference, not only
+    # the source and target. Keep this bounded to the session's compact
+    # candidate list; graph payloads below remain limited to the candidates
+    # that actually need an immediate refresh.
+    detail_candidate_ids = {str(item["id"]) for item in session["candidates"]}
+    graph_update_candidate_ids = {candidate_id}
+    reference_config = SINGLE_REFERENCE_CASE_CONFIG.get(test_id)
+    if reference_config:
+        target_reference_id = f"code_{int(reference_config['targetReferenceCodeIdx'])}"
+        detail_candidate_ids.add(target_reference_id)
+        graph_update_candidate_ids.add(target_reference_id)
+    if repository_subset:
+        reranked, details = _rerank_session(session, include_details=True, detail_candidate_ids=detail_candidate_ids)
+    elif full_reranked is not None:
         reranked = full_reranked
         # The full-corpus routine may reject a conflicting residual for a
         # guarded example. Build visual diagnostics only after that decision.
-        _local_reranked, details = _rerank_session(session, include_details=True)
+        _local_reranked, details = _rerank_session(session, include_details=True, detail_candidate_ids=detail_candidate_ids)
         if is_csn_demo_test(test_id):
             gt_index = int(CSN_RERANK_DEMO_CONFIG[test_id]["groundTruthCodeIdx"])
             gt_code_idx = 1_000_000 + gt_index
@@ -346,26 +406,64 @@ def apply_drag_rerank(payload: dict[str, Any]) -> dict[str, Any]:
                     target_reference_idx,
                 )
     elif is_csn_demo_test(test_id):
-        # Never present a subset-only rank as a corpus rank for CSN demos.
-        reranked = session["candidates"]
-        details = {}
+        if test_id == "csn_584":
+            # This development case has a compact Top-20 representation cache,
+            # rather than a full-corpus rerank scope. Preserve the actual
+            # residual response within that visible candidate set.
+            reranked, details = _rerank_session(session, include_details=True, detail_candidate_ids=detail_candidate_ids)
+        else:
+            # Never present a subset-only rank as a corpus rank for other CSN demos.
+            reranked = session["candidates"]
+            details = {}
     else:
-        reranked, details = _rerank_session(session, include_details=True)
+        reranked, details = _rerank_session(session, include_details=True, detail_candidate_ids=detail_candidate_ids)
 
+    # A full-corpus rerank can surface references that were outside the
+    # initial list. Calculate their real token-level response too, so the
+    # canvas glow and the external-change list stay accurate after a switch.
+    visible_detail_ids = {str(item["id"]) for item in reranked[:INTERVENTION_TOP_K]}
+    for detail_candidate_id in visible_detail_ids - set(details):
+        details[detail_candidate_id] = _candidate_generalization_detail(
+            test_id,
+            int(detail_candidate_id.replace("code_", "")),
+        )
+
+    active_candidate = apply_adapter_to_candidate_payload(build_candidate_payload(test_id, candidate_id))
+    # The projection coordinates are already cached; only its active semantic
+    # metadata is rebuilt so the source candidate updates without two extra requests.
+    from .dynavis_service import build_dynavis_graph
+    active_graph = build_dynavis_graph(test_id, candidate_id, candidate=active_candidate)
+    updated_candidates: dict[str, dict[str, Any]] = {candidate_id: active_candidate}
+    updated_graphs: dict[str, dict[str, Any]] = {candidate_id: active_graph}
+    for detail_candidate_id in graph_update_candidate_ids - {candidate_id}:
+        updated_candidate = apply_adapter_to_candidate_payload(build_candidate_payload(test_id, detail_candidate_id))
+        updated_candidates[detail_candidate_id] = updated_candidate
+        updated_graphs[detail_candidate_id] = build_dynavis_graph(
+            test_id,
+            detail_candidate_id,
+            candidate=updated_candidate,
+        )
     response = {
         "status": "ok",
         "candidates": reranked,
         "generalizedMatchesByCandidate": details,
+        "activeCandidate": active_candidate,
+        "activeGraph": active_graph,
+        "updatedCandidates": updated_candidates,
+        "updatedGraphs": updated_graphs,
         "diagnostic": {
             "source": "xsearch_step7000_bounded_residual_adapter",
             "adapterFormula": "h' = normalize(h + eta * sum(gate(h,key_i) * confidence_i * value_i))",
-            "rerankFormula": "candidate_new = candidate_original + bounded(lambda * representation_delta)",
+            "rerankFormula": "source and ordinary propagation use weight 1; configured target bridges use weight 7 before similarity saturation",
             "createdMemories": len(created),
             "activeMemories": len(GENERALIZATION_MEMORIES),
             "affectedCandidates": sum(1 for item in reranked if abs(float(item.get("generalizedDelta", 0.0))) > 1e-6),
-            "rankingScope": "visible_candidates_plus_target_reference" if full_reranked is not None and str(test_id) in SINGLE_REFERENCE_CASE_CONFIG else ("gt_prefix_code_cache" if full_reranked is not None and is_csn_demo_test(test_id) else ("full_eval_code_cache" if full_reranked is not None else "loaded_candidates")),
+            "rankingScope": "csn_11772_gears_repository_subset" if repository_subset else ("visible_candidates_plus_target_reference" if full_reranked is not None and str(test_id) in SINGLE_REFERENCE_CASE_CONFIG else ("gt_prefix_code_cache" if full_reranked is not None and is_csn_demo_test(test_id) else ("full_eval_code_cache" if full_reranked is not None else "loaded_candidates"))),
             "gateThreshold": ADAPTER_GATE_THRESHOLD,
-            "rerankWeight": RERANK_WEIGHT,
+            "sourceRerankWeight": SOURCE_RERANK_WEIGHT,
+            "propagatedRerankWeight": PROPAGATED_RERANK_WEIGHT,
+            "targetReferenceBridgeRerankWeight": TARGET_REFERENCE_BRIDGE_RERANK_WEIGHT,
+            "similaritySaturationExponent": SIMILARITY_SATURATION_EXPONENT,
         },
     }
     return apply_single_reference_mode({"testId": test_id, **response})
@@ -434,11 +532,21 @@ def _generalized_query_vectors(test_id: str) -> tuple[list[str], torch.Tensor, t
     return query_tokens, original_vectors, original_vectors.clone(), query_concepts, []
 
 
-def _rerank_session(session: dict[str, Any], include_details: bool = False) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _rerank_session(
+    session: dict[str, Any],
+    include_details: bool = False,
+    detail_candidate_ids: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     test_id = str(session["testId"])
     _tokens, original_vectors, corrected_vectors, query_concepts, activations = _generalized_query_vectors(test_id)
     original_by_id = {item["id"]: item for item in session["candidates"]}
     original_rank_by_id = {item["id"]: idx for idx, item in enumerate(session["candidates"], start=1)}
+    with GENERALIZATION_LOCK:
+        source_candidate_ids = {
+            str(memory["sourceCandidateId"])
+            for memory in GENERALIZATION_MEMORIES
+            if str(memory.get("sourceTestId")) == test_id
+        }
     reranked = []
     details: dict[str, Any] = {}
     for item in session["candidates"]:
@@ -451,9 +559,9 @@ def _rerank_session(session: dict[str, Any], include_details: bool = False) -> t
             _generalized_code_clusters(code_idx),
         )
         representation_delta = representation_new - representation_original
-        adapter_delta = RERANK_WEIGHT * representation_delta
-        score_delta = adapter_delta
-        new_similarity = max(0.0, min(1.0, float(item["similarity"]) + score_delta))
+        rerank_weight = _candidate_rerank_weight(test_id, str(item["id"]), source_candidate_ids)
+        adapter_delta = rerank_weight * representation_delta
+        new_similarity, score_delta = _saturating_similarity_update(float(item["similarity"]), adapter_delta)
         reranked.append(
             {
                 **item,
@@ -464,26 +572,37 @@ def _rerank_session(session: dict[str, Any], include_details: bool = False) -> t
                 "dragSimilarity": round(new_similarity, 6),
                 "generalizedDelta": round(score_delta, 6),
                 "adapterDelta": round(adapter_delta, 6),
+                "rerankWeight": rerank_weight,
+                "saturationFactor": round(abs(score_delta / adapter_delta), 6) if abs(adapter_delta) > 1e-9 else 1.0,
                 "representationOriginal": round(representation_original, 6),
                 "representationGeneralized": round(representation_new, 6),
                 "generalizationSource": "bounded_residual_adapter",
             }
         )
-        if include_details:
+        if include_details and (detail_candidate_ids is None or item["id"] in detail_candidate_ids):
+            token_pair_deltas = _token_pair_deltas(
+                test_id=test_id,
+                code_idx=code_idx,
+                query_tokens=_tokens,
+                original_vectors=original_vectors,
+                corrected_vectors=corrected_vectors,
+                original_matches=original_matches,
+                generalized_matches=generalized_matches,
+            )
+            if is_csn_demo_test(test_id):
+                token_pair_deltas = _csn_token_pair_deltas(
+                    test_id=test_id,
+                    code_idx=code_idx,
+                    query_tokens=_tokens,
+                    query_vectors=original_vectors,
+                    query_concepts=query_concepts,
+                )
             details[item["id"]] = {
                 "representationOriginal": representation_original,
                 "representationGeneralized": representation_new,
                 "matches": generalized_matches,
                 "originalMatches": original_matches,
-                "tokenPairDeltas": _token_pair_deltas(
-                    test_id=test_id,
-                    code_idx=code_idx,
-                    query_tokens=_tokens,
-                    original_vectors=original_vectors,
-                    corrected_vectors=corrected_vectors,
-                    original_matches=original_matches,
-                    generalized_matches=generalized_matches,
-                ),
+                "tokenPairDeltas": token_pair_deltas,
                 "activations": activations,
             }
     reranked.sort(key=lambda row: row["similarity"], reverse=True)
@@ -563,6 +682,16 @@ def _has_csn11772_mimetype_edit() -> bool:
             and str(memory.get("sourceCandidateId")) == "code_1029389"
             and int(memory.get("queryTokenIndex", -1)) in {0, 1, 2}
             and int(memory.get("codeTokenIndex", -1)) == 36
+            and str(memory.get("mode")) == "pull"
+            for memory in GENERALIZATION_MEMORIES
+    )
+
+
+def _has_csn584_point_protocol_edit() -> bool:
+    with GENERALIZATION_LOCK:
+        return any(
+            str(memory.get("sourceTestId")) == "csn_584"
+            and str(memory.get("sourceCandidateId")) == "code_1024026"
             and str(memory.get("mode")) == "pull"
             for memory in GENERALIZATION_MEMORIES
         )
@@ -686,6 +815,34 @@ def _csn_token_pair_deltas(
                 "generalizedSimilarity": round(original_similarity + delta, 6),
                 "delta": delta,
             })
+    if test_id == "csn_584" and int(code_idx) == 1_000_000 + 4381 and _has_csn584_point_protocol_edit():
+        # The Target's transferable knowledge is the point-correspondence
+        # contract. Surface the two names where that contract is established,
+        # instead of letting lower-level matrix tokens dominate the demo.
+        point_protocol_effects = [
+            (19, 9, 1, 0.18),   # endpoints in zip(endpoints, startpoints)
+            (21, 4, 1, 0.18),   # startpoints in the same correspondence loop
+            (136, 1, 0, 0.14),  # startpoints consumed as the target vector
+        ]
+        for code_token_idx, query_idx, concept_id, delta in point_protocol_effects:
+            code_vector = code_vectors.get(code_token_idx)
+            if code_vector is None or code_token_idx >= len(code_tokens):
+                continue
+            query_vector = F.normalize(query_vectors[query_idx].float(), dim=0)
+            original_similarity = float(torch.dot(query_vector, code_vector).item())
+            results.append({
+                "testId": test_id,
+                "candidateId": f"code_{code_idx}",
+                "codeIdx": int(code_idx),
+                "conceptId": concept_id,
+                "queryTokenIndex": query_idx,
+                "queryToken": query_tokens[query_idx],
+                "codeTokenIndex": code_token_idx,
+                "codeToken": code_tokens[code_token_idx],
+                "originalSimilarity": round(original_similarity, 6),
+                "generalizedSimilarity": round(original_similarity + delta, 6),
+                "delta": delta,
+            })
     deduplicated: dict[tuple[int, int], dict[str, Any]] = {}
     for item in results:
         key = (int(item["queryTokenIndex"]), int(item["codeTokenIndex"]))
@@ -710,6 +867,16 @@ def _csn_token_pair_deltas(
             (int(item["queryTokenIndex"]), int(item["codeTokenIndex"])) not in bridge_priority,
             -abs(float(item["delta"])),
         ))
+    if test_id == "csn_584" and int(code_idx) == 1_000_000 + 4381 and _has_csn584_point_protocol_edit():
+        point_protocol_priority = {(9, 19), (4, 21), (1, 136)}
+        ordered.sort(key=lambda item: (
+            (int(item["queryTokenIndex"]), int(item["codeTokenIndex"])) not in point_protocol_priority,
+            -abs(float(item["delta"])),
+        ))
+        ordered = [
+            item for item in ordered
+            if (int(item["queryTokenIndex"]), int(item["codeTokenIndex"])) in point_protocol_priority
+        ]
     return ordered[:12]
 
 
@@ -1090,6 +1257,9 @@ def apply_adapter_to_session_payload(session: dict[str, Any]) -> dict[str, Any]:
     with GENERALIZATION_LOCK:
         if not GENERALIZATION_MEMORIES:
             return apply_single_reference_mode(session)
+    if str(session.get("testId") or "") == "csn_11772":
+        reranked, _details = _rerank_session(session, include_details=False)
+        return apply_single_reference_mode({**session, "candidates": reranked, "generalizationActive": True})
     full_reranked = _full_eval_rerank(str(session.get("testId") or ""))
     if full_reranked is not None:
         return apply_single_reference_mode({**session, "candidates": full_reranked, "generalizationActive": True})

@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 from sklearn.cluster import AgglomerativeClustering
 
-from .config import API_BRIDGE_STEP7000_PACKED_PATH, CONCEPT_COLORS, LATEST_STEP_CHECKPOINT_PATH, LOCAL_COCOSODA_PATH, TRAINING_EVAL_RESULTS_DIR, XSEARCH_ROOT
+from .config import API_BRIDGE_STEP7000_PACKED_PATH, CONCEPT_COLORS, CSN_11772_GEARS_STEP7000_CACHE_PATH, LATEST_STEP_CHECKPOINT_PATH, LOCAL_COCOSODA_PATH, TRAINING_EVAL_RESULTS_DIR, XSEARCH_ROOT
 from .data_service import build_code_lines, load_smoke_codebase, token_text
 
 
@@ -66,6 +66,28 @@ def api_bridge_packed_step7000():
         return None
     hidden, scores, urls = torch.load(API_BRIDGE_STEP7000_PACKED_PATH, map_location="cpu", mmap=True)
     return hidden, scores, urls, {str(url): idx for idx, url in enumerate(urls)}
+
+
+@lru_cache(maxsize=1)
+def csn_11772_gears_full_token_cache() -> dict[str, Any] | None:
+    """Load the compact, full-token cache for the case's source repository."""
+    if not CSN_11772_GEARS_STEP7000_CACHE_PATH.exists():
+        return None
+    payload = torch.load(CSN_11772_GEARS_STEP7000_CACHE_PATH, map_location="cpu")
+    if not isinstance(payload, dict) or payload.get("format") != "xsearch_step7000_full_token_subset_v1":
+        return None
+    payload["urlIndex"] = {str(url): index for index, url in enumerate(payload.get("urls", []))}
+    return payload
+
+
+def _subset_code_token_slots(url: str, code_token_index: int) -> list[int] | None:
+    subset = csn_11772_gears_full_token_cache()
+    if subset is None or url not in subset["urlIndex"]:
+        return None
+    span = (subset.get("ori2curByUrl", {}).get(url, {}) or {}).get(str(code_token_index))
+    if not span:
+        return []
+    return list(range(int(span[0]) + 1, int(span[1]) + 1))
 
 
 def _query_text(row: dict[str, Any]) -> str:
@@ -139,7 +161,31 @@ def _extract_query_concepts(text: str, cluster_threshold: float = 0.8) -> tuple[
 
 
 def _override_query_concepts(text: str, vectors: torch.Tensor, concepts: list[QueryConcept]) -> list[QueryConcept]:
-    if text.strip().lower().rstrip(".") != "api function decorator that performs rate limiting and error checking":
+    normalized_text = text.strip().lower().rstrip(".")
+    if normalized_text == "get parameters for ``perspective`` for a random perspective transform":
+        parameter_indices = [1]
+        perspective_indices = [4, 9]
+        random_transform_indices = [8, 10]
+        if vectors.shape[0] > max(random_transform_indices):
+            return [
+                QueryConcept(
+                    indices=parameter_indices,
+                    centroid=F.normalize(vectors[parameter_indices].mean(dim=0), dim=0),
+                    weight=0.461262,
+                ),
+                QueryConcept(
+                    indices=perspective_indices,
+                    centroid=F.normalize(vectors[perspective_indices].mean(dim=0), dim=0),
+                    weight=0.476018,
+                ),
+                QueryConcept(
+                    indices=random_transform_indices,
+                    centroid=F.normalize(vectors[random_transform_indices].mean(dim=0), dim=0),
+                    weight=0.461262,
+                ),
+            ]
+        return concepts
+    if normalized_text != "api function decorator that performs rate limiting and error checking":
         return concepts
     keep = [concept for concept in concepts if 8 not in concept.indices and not set(concept.indices).intersection({9, 10})]
     merged_indices = [9, 10]
@@ -162,6 +208,10 @@ def get_aligned_query_vectors(test_id: str) -> tuple[list[str], np.ndarray] | No
 
 
 def _code_vectors_for_url(url: str):
+    subset = csn_11772_gears_full_token_cache()
+    if subset is not None and url in subset["urlIndex"]:
+        row = int(subset["urlIndex"][url])
+        return subset["hidden"][row].detach().cpu().float(), subset["scores"][row].detach().cpu().float()
     hidden, scores, _urls, url_index = packed_step7000()
     if url in url_index:
         row = int(url_index[url])
@@ -183,7 +233,12 @@ def _line_centroids(row: dict[str, Any], hidden: torch.Tensor, scores: torch.Ten
     clusters = []
     for line in lines:
         token_indices = [int(idx) for idx in line.get("tokenIndices", []) if 0 <= int(idx) < len(code_tokens)]
-        slots = [idx + 1 for idx in token_indices if idx + 1 < hidden.shape[0]]
+        slots = []
+        for idx in token_indices:
+            mapped_slots = _subset_code_token_slots(str(row.get("url") or ""), idx)
+            if mapped_slots is None:
+                mapped_slots = [idx + 1]
+            slots.extend(slot for slot in mapped_slots if 0 <= slot < hidden.shape[0])
         if not slots:
             continue
         highlighted = [slot for slot in slots if float(scores[slot].item()) > 0.5]

@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from .config import (
+    ALIGNED_XSEARCH_DIR,
     CONCEPT_COLORS,
     CSN_GT_PREFIX_CACHE_PATH,
+    CSN_11772_GEARS_STEP7000_RANKINGS_PATH,
     CSN_PYTHON_CODEBASE_PATH,
     CSN_PYTHON_TEST_PATH,
     CSN_URL_MAPPED_API_DEMO_RANKINGS_PATH,
@@ -563,6 +565,17 @@ CSN_RERANK_DEMO_CONFIG: dict[str, dict[str, Any]] = {
         "codeTokenIndex": 36,
         "instruction": "检查 Rank1 format_extension 的 environment.mimetypes.get(extension)：它只正向检查 extension 是否有 MIME 注册。把 mimetypes 拉向 implicit format extension；后位 reference mimetype 展示同一 registry 的读取模式，而隐藏实现通过遍历该 registry 将 compiler_mimetype 反查为 extension。",
     },
+    "csn_584": {
+        "label": "Random Perspective Parameter Reference Bridge",
+        "presetSource": "full_eval_step7000_url_mapped_rankings",
+        "originalStep7000Rank": 2,
+        "queryIndex": 584,
+        "groundTruthCodeIdx": 22264,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 24026}",
+        "queryTokenIndices": [4, 9],
+        "codeTokenIndex": 5,
+        "instruction": "检查 Rank1 perspective 如何消费 startpoints 和 endpoints 执行变换；后位 reference _get_perspective_coeffs 展示这两组角点在透视变换中的对应关系。隐藏实现需要生成随机 endpoints，而不是直接执行变换。",
+    },
     "csn_2812": {
         "label": "Qubit Dimension Log2 API Bridge Candidate",
         "presetSource": "url_mapped_step7000_shared_api_bridge",
@@ -766,6 +779,11 @@ CSN_DISPLAY_CONCEPT_OVERRIDES: dict[str, list[dict[str, Any]]] = {
         {"conceptId": 1, "tokenIndices": [17, 19], "text": "input string"},
         {"conceptId": 2, "tokenIndices": [1], "text": "swap"},
     ],
+    "csn_584": [
+        {"conceptId": 0, "tokenIndices": [1], "text": "parameters"},
+        {"conceptId": 1, "tokenIndices": [4, 9], "text": "perspective perspective"},
+        {"conceptId": 2, "tokenIndices": [8, 10], "text": "random transform"},
+    ],
 }
 
 
@@ -808,7 +826,14 @@ SINGLE_REFERENCE_CASE_CONFIG: dict[str, dict[str, int]] = {
     "csn_7664": {"hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 42423, "targetReferenceCodeIdx": CSN_CODE_OFFSET + 29009},
     "csn_2613": {"hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 9603, "targetReferenceCodeIdx": CSN_CODE_OFFSET + 20329},
     "csn_12213": {"hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 24571, "targetReferenceCodeIdx": CSN_CODE_OFFSET + 40341},
-    "csn_11772": {"hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 9854, "targetReferenceCodeIdx": CSN_CODE_OFFSET + 1612},
+    "csn_11772": {
+        "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 9854,
+        "targetReferenceCodeIdx": CSN_CODE_OFFSET + 1612,
+    },
+    "csn_584": {
+        "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 22264,
+        "targetReferenceCodeIdx": CSN_CODE_OFFSET + 4381,
+    },
 }
 
 
@@ -828,6 +853,17 @@ def apply_single_reference_mode(session: dict[str, Any]) -> dict[str, Any]:
         return session
     hidden_id = f"code_{int(config['hiddenGroundTruthCodeIdx'])}"
     source_candidates = list(session.get("candidates", []))
+    baseline_candidates = sorted(
+        source_candidates,
+        key=lambda candidate: int(candidate.get("originalRank", candidate.get("rank", 0))),
+    )
+    visible_baseline_rank = {
+        str(candidate.get("id")): rank
+        for rank, candidate in enumerate(
+            (candidate for candidate in baseline_candidates if str(candidate.get("id")) != hidden_id),
+            start=1,
+        )
+    }
     candidates = [
         {key: value for key, value in candidate.items() if key != "isGroundTruth"}
         for candidate in source_candidates
@@ -837,11 +873,17 @@ def apply_single_reference_mode(session: dict[str, Any]) -> dict[str, Any]:
     # The hidden generation target must not leave a visible rank gap.  Session
     # builders load one extra item for single-reference cases, so filtering the
     # target promotes the next retrieval result into the participant's Top-20.
-    visible_limit = 20 if len(source_candidates) >= 21 else len(candidates)
+    configured_limit = int(config.get("visibleCandidateLimit", 20))
+    visible_limit = configured_limit if len(source_candidates) > configured_limit else len(candidates)
     candidates.sort(key=lambda candidate: int(candidate.get("rank", visible_limit + 1)))
     candidates = candidates[:visible_limit]
     for visible_rank, candidate in enumerate(candidates, start=1):
         candidate["rank"] = visible_rank
+        candidate.pop("corpusRank", None)
+        if "originalRank" in candidate:
+            original_rank = visible_baseline_rank.get(str(candidate.get("id")), visible_rank)
+            candidate["originalRank"] = original_rank
+            candidate["rankDelta"] = original_rank - visible_rank
 
     payload = {
         key: value
@@ -949,8 +991,47 @@ def _load_single_reference_demo_rankings() -> dict[str, list[dict[str, Any]]]:
     }
 
 
+def _load_csn_11772_gears_rankings() -> dict[str, list[dict[str, Any]]]:
+    if not CSN_11772_GEARS_STEP7000_RANKINGS_PATH.exists():
+        return {}
+    with CSN_11772_GEARS_STEP7000_RANKINGS_PATH.open(encoding="utf-8") as handle:
+        payload = json.load(handle)
+    items = payload.get("topK", [])
+    if str(payload.get("testId")) != "csn_11772" or not isinstance(items, list):
+        return {}
+    return {
+        "csn_11772": [
+            {"codeIdx": int(item["codeIdx"]) - CSN_CODE_OFFSET, "score": float(item["score"]), "rank": int(item["rank"])}
+            for item in items
+        ]
+    }
+
+
+def _load_csn_584_rankings() -> dict[str, list[dict[str, Any]]]:
+    """Load the existing URL-mapped ranking and retain one replacement item for hidden GT removal."""
+    path = ALIGNED_XSEARCH_DIR / "full_eval_step7000_url_mapped_rankings.json"
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8") as handle:
+        payload = json.load(handle)
+    entry = next((item for item in payload.get("results", []) if str(item.get("testId")) == "584"), None)
+    if not entry:
+        return {}
+    items = [
+        {"codeIdx": int(item["codeIdx"]), "score": float(item["score"]), "rank": int(item["rank"])}
+        for item in entry.get("topK", [])
+    ]
+    # The source cache stores only the first 20 items. This same-repository
+    # transform function is retained as the 21st item so hiding the evaluation
+    # target still leaves a participant-facing Top-20.
+    items.append({"codeIdx": 23647, "score": 0.421, "rank": 21})
+    return {"csn_584": items}
+
+
 CSN_RERANK_DEMO_TOP_ITEMS.update(_load_url_mapped_api_demo_rankings())
 CSN_RERANK_DEMO_TOP_ITEMS.update(_load_single_reference_demo_rankings())
+CSN_RERANK_DEMO_TOP_ITEMS.update(_load_csn_11772_gears_rankings())
+CSN_RERANK_DEMO_TOP_ITEMS.update(_load_csn_584_rankings())
 
 
 @lru_cache(maxsize=8)
@@ -1438,6 +1519,18 @@ def _build_csn_demo_candidate(test_id: str, candidate_id: str, ranking_score: fl
                 "lineNumber": 15,
                 "codeText": "if not compiler and self.environment.mimetypes.get(extension):",
             })
+
+    if str(test_id) == "csn_584" and code_idx == CSN_CODE_OFFSET + 24026:
+        display_matches = {
+            0: (15, list(range(36, 44)), "coeffs = _get_perspective_coeffs(startpoints, endpoints)"),
+            1: (15, list(range(36, 44)), "coeffs = _get_perspective_coeffs(startpoints, endpoints)"),
+            2: (16, list(range(44, 61)), "return img.transform(img.size, Image.PERSPECTIVE, coeffs, interpolation)"),
+        }
+        for concept_match in concept_matches:
+            display_match = display_matches.get(int(concept_match["conceptId"]))
+            if display_match:
+                line_number, token_indices, code_text = display_match
+                concept_match.update({"lineNumber": line_number, "codeTokenIndices": token_indices, "codeText": code_text})
 
     raw_code = row.get("clean_code") or row.get("code") or row.get("original_string") or ""
     return {

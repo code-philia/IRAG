@@ -209,7 +209,7 @@ def code_token_representation(code_idx: int, code_token_index: int) -> torch.Ten
 @lru_cache(maxsize=128)
 def code_token_representations(code_idx: int) -> dict[int, torch.Tensor]:
     if is_csn_code_idx(int(code_idx)):
-        from .aligned_xsearch_service import _code_vectors_for_url
+        from .aligned_xsearch_service import _code_vectors_for_url, _subset_code_token_slots
 
         row = get_row(int(code_idx))
         code_pack = _code_vectors_for_url(row.get("url", ""))
@@ -218,8 +218,14 @@ def code_token_representations(code_idx: int) -> dict[int, torch.Tensor]:
         hidden, _scores = code_pack
         code_tokens = list(row.get("code_tokens") or [])
         vectors: dict[int, torch.Tensor] = {}
-        for code_token_index in range(min(len(code_tokens), hidden.shape[0] - 1)):
-            vectors[int(code_token_index)] = F.normalize(hidden[int(code_token_index) + 1].float(), dim=0)
+        for code_token_index in range(len(code_tokens)):
+            slots = _subset_code_token_slots(str(row.get("url") or ""), code_token_index)
+            if slots is None:
+                slots = [code_token_index + 1]
+            slots = [slot for slot in slots if 0 <= slot < hidden.shape[0]]
+            if not slots:
+                continue
+            vectors[int(code_token_index)] = F.normalize(hidden[slots].mean(dim=0).float(), dim=0)
         return vectors
 
     feature, hidden, _scores = _encode_code_row(int(code_idx))

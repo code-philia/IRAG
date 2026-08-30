@@ -15,6 +15,7 @@ from .intervention_service import (
     apply_adapter_to_candidate_payload,
     apply_adapter_to_session_payload,
     apply_drag_rerank,
+    has_active_interventions,
     apply_manual_link,
     reset_interventions,
 )
@@ -34,7 +35,11 @@ def _generic_service():
     return generic_dual_encoder_service
 
 
-BOOTSTRAP_PREWARM_TEST_IDS = ("csn_11078", "csn_11087")
+BOOTSTRAP_PREWARM_TEST_IDS = ("csn_11078", "csn_11087", "csn_11772", "csn_584")
+STUDY_STATIC_BUNDLE_READY: dict[str, threading.Event] = {
+    "csn_11772": threading.Event(),
+    "csn_584": threading.Event(),
+}
 
 
 @lru_cache(maxsize=16)
@@ -47,6 +52,26 @@ def _cached_initial_bootstrap(test_id: str, top_k: int) -> dict:
     candidate = apply_adapter_to_candidate_payload(build_candidate_payload(test_id, candidate_id))
     graph = build_dynavis_graph(test_id, candidate_id, candidate=candidate)
     return {"session": session, "candidate": candidate, "graph": graph}
+
+
+@lru_cache(maxsize=128)
+def _cached_static_candidate_graph(test_id: str, candidate_id: str) -> dict:
+    """Reuse immutable candidate geometry while users switch candidates."""
+    candidate = build_candidate_payload(test_id, candidate_id)
+    return build_dynavis_graph(test_id, candidate_id, candidate=candidate)
+
+
+@lru_cache(maxsize=2)
+def _cached_static_candidate_bundle(test_id: str, top_k: int) -> dict:
+    """A browser-ready cache for the small, fixed study candidate set."""
+    session = build_session_payload(test_id, top_k)
+    candidates: dict[str, dict] = {}
+    graphs: dict[str, dict] = {}
+    for item in session.get("candidates", []):
+        candidate_id = str(item["id"])
+        candidates[candidate_id] = build_candidate_payload(test_id, candidate_id)
+        graphs[candidate_id] = _cached_static_candidate_graph(test_id, candidate_id)
+    return {"candidates": candidates, "graphs": graphs}
 
 
 @lru_cache(maxsize=16)
@@ -65,7 +90,12 @@ def _cached_generic_bootstrap(test_id: str, top_k: int) -> dict:
 def _prewarm_bootstrap_cache() -> None:
     for test_id in BOOTSTRAP_PREWARM_TEST_IDS:
         try:
-            _cached_initial_bootstrap(test_id, 20)
+            bootstrap = _cached_initial_bootstrap(test_id, 20)
+            if test_id in STUDY_STATIC_BUNDLE_READY:
+                for candidate in bootstrap["session"].get("candidates", []):
+                    _cached_static_candidate_graph(test_id, str(candidate["id"]))
+                _cached_static_candidate_bundle(test_id, 20)
+                STUDY_STATIC_BUNDLE_READY[test_id].set()
         except Exception as exc:
             print(f"Bootstrap prewarm skipped for {test_id}: {exc}")
 
@@ -133,6 +163,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                 epoch = int(query.get("epoch", ["4"])[0])
                 if _requested_model(query=query) == "codebert":
                     self._send_json(_generic_service().build_graph(test_id, candidate_id))
+                elif not has_active_interventions(test_id):
+                    self._send_json(_cached_static_candidate_graph(test_id, candidate_id))
                 else:
                     self._send_json(build_dynavis_graph(test_id, candidate_id, epoch))
             elif path.startswith("/api/generation/task/"):
@@ -178,7 +210,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                     self._send_json(_cached_generic_bootstrap(test_id, top_k))
                 else:
                     reset_interventions({"testId": test_id})
-                    self._send_json(_cached_initial_bootstrap(test_id, top_k))
+                    response = dict(_cached_initial_bootstrap(test_id, top_k))
+                    if test_id in STUDY_STATIC_BUNDLE_READY and top_k == 20 and STUDY_STATIC_BUNDLE_READY[test_id].is_set():
+                        response["prefetched"] = _cached_static_candidate_bundle(test_id, top_k)
+                    self._send_json(response)
             elif parsed.path == "/api/logs/events":
                 self._send_json(append_event(data))
             elif parsed.path == "/api/study/session/start":

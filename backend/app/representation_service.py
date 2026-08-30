@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from .config import API_BRIDGE_STEP7000_PACKED_PATH, ROOT_DIR, TRAINING_EVAL_RESULTS_DIR
+from .config import API_BRIDGE_STEP7000_PACKED_PATH, CSN_11772_GEARS_STEP7000_CACHE_PATH, ROOT_DIR, TRAINING_EVAL_RESULTS_DIR
 
 
 PACKED_PREFIX = "python_full"
@@ -66,6 +66,19 @@ def _torch_load(path: Path):
 
 
 @lru_cache(maxsize=1)
+def _csn_11772_gears_subset() -> dict[str, Any] | None:
+    if not CSN_11772_GEARS_STEP7000_CACHE_PATH.exists():
+        return None
+    import torch
+
+    payload = torch.load(CSN_11772_GEARS_STEP7000_CACHE_PATH, map_location="cpu")
+    if not isinstance(payload, dict) or payload.get("format") != "xsearch_step7000_full_token_subset_v1":
+        return None
+    payload["urlIndex"] = {str(item): index for index, item in enumerate(payload.get("urls", []))}
+    return payload
+
+
+@lru_cache(maxsize=1)
 def load_url_index() -> dict[str, int]:
     steps = discover_packed_steps()
     if not steps:
@@ -76,6 +89,35 @@ def load_url_index() -> dict[str, int]:
 
 
 def get_packed_timeline(url: str, requested_code_tokens: int) -> PackedTimeline | None:
+    subset = _csn_11772_gears_subset()
+    if subset is not None and url in subset["urlIndex"]:
+        row_index = int(subset["urlIndex"][url])
+        hidden = subset["hidden"][row_index].detach().cpu()
+        source_map = (subset.get("ori2curByUrl", {}).get(url, {}) or {})
+        vectors: list[np.ndarray] = []
+        for code_index in range(int(requested_code_tokens)):
+            span = source_map.get(str(code_index))
+            if not span:
+                break
+            slots = list(range(int(span[0]) + 1, min(int(span[1]) + 1, hidden.shape[0])))
+            if not slots:
+                break
+            vectors.append(hidden[slots].mean(dim=0).numpy().astype(np.float32, copy=True))
+        if not vectors:
+            return None
+        array = np.stack(vectors, axis=0)
+        return PackedTimeline(
+            source="csn_11772_gears_full_token_subset_cache",
+            kind="last_layer_code_token_hidden",
+            epochs=[1, 2, 3, 4],
+            code_vectors_by_epoch=[array, array.copy(), array.copy(), array.copy()],
+            code_token_count=int(array.shape[0]),
+            hidden_dim=int(array.shape[1]),
+            url=url,
+            url_index=row_index,
+            token_slot_offset=CODE_TOKEN_SLOT_OFFSET,
+        )
+
     steps = discover_packed_steps()
     if not steps or not url:
         return None

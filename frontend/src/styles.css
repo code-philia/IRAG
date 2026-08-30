@@ -102,6 +102,27 @@ h1 {
   color: #ffffff;
 }
 
+.toolbar .reference-action {
+  border-color: #79bd95;
+  background: #edf8f1;
+  color: #145c39;
+  font-weight: 720;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+
+.toolbar .reference-action:hover:not(:disabled) {
+  border-color: #3b9163;
+  background: #dff3e7;
+  color: #0d4c2c;
+}
+
+.toolbar .reference-action:disabled {
+  border-color: #d5dce3;
+  background: #f5f7f8;
+  color: #94a0ae;
+  box-shadow: none;
+}
+
 .workspace {
   min-height: 0;
   height: calc(100vh - 98px);
@@ -197,7 +218,16 @@ h1 {
   gap: 8px;
 }
 
+.issue-concept-title {
+  margin-top: 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #526174;
+  letter-spacing: 0;
+}
+
 .concept-list {
+  margin-top: 6px;
   flex: 0 0 auto;
   padding-right: 2px;
 }
@@ -657,7 +687,7 @@ h1 {
 
 .adjudication-candidate-title {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 6px 8px;
@@ -665,16 +695,54 @@ h1 {
   font-size: 11px;
 }
 
+.adjudication-candidate-title > div {
+  min-width: 0;
+}
+
 .adjudication-candidate-title strong {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .adjudication-candidate-title span {
+  display: block;
   flex: 0 0 auto;
   color: #536174;
   font-variant-numeric: tabular-nums;
+}
+
+.adjudication-reference-action {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  border-color: transparent;
+  background: transparent;
+  color: #175f3c;
+  padding: 4px 3px;
+  font-size: 10px;
+  font-weight: 720;
+}
+
+.adjudication-reference-action:hover:not(:disabled) {
+  background: #e7f6ed;
+  color: #0d4c2c;
+}
+
+.generation-opening-panel {
+  min-height: 260px;
+}
+
+.generation-opening-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #536174;
+  font-size: 13px;
+  padding: 28px 0;
 }
 
 .adjudication-lines {
@@ -2304,6 +2372,425 @@ h1 {
   border: 0;
   border-radius: 0;
   box-shadow: none;
+}
+
+.issue-grounded-brief {
+  width: min(1480px, calc(100% - 32px));
+  min-height: calc(100vh - 76px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  padding: 26px 44px 22px;
+  background: #f8fafc;
+}
+
+.issue-brief-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.issue-brief-kicker,
+.issue-query-label {
+  color: #526173;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.issue-brief-header h2 {
+  margin: 3px 0 5px;
+  color: #162c46;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.issue-brief-header p {
+  max-width: 780px;
+  color: #526173;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.issue-brief-flow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-top: 1px solid #dbe3ed;
+  border-bottom: 1px solid #dbe3ed;
+  color: #42546a;
+  font-size: 13px;
+}
+
+.issue-brief-flow code,
+.issue-brief-stage code {
+  color: #193e66;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.94em;
+}
+
+.issue-brief-flow code {
+  padding: 3px 7px;
+  border: 1px solid #ccd8e5;
+  background: #fff;
+}
+
+.issue-brief-flow svg {
+  color: #708299;
+}
+
+.issue-brief-stages {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 0;
+  border: 1px solid #d7e0ea;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.issue-brief-stage {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 18px 28px;
+  border-right: 0;
+  border-bottom: 1px solid #d7e0ea;
+}
+
+.issue-brief-stage:last-child {
+  border-bottom: 0;
+  background: #f5f8fc;
+}
+
+.issue-brief-stage h3 {
+  margin: 12px 0 0;
+  color: #1e3a5f;
+  font-size: 19px;
+}
+
+.issue-brief-stage p {
+  color: #34465a;
+  font-size: 14px;
+  line-height: 1.58;
+}
+
+.github-issue-mock {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: start;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  padding: 2px 4px 0;
+  color: #24292f;
+  font-size: 13px;
+}
+
+.github-repo {
+  color: #0969da;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.github-repo span {
+  color: #57606a;
+  font-weight: 400;
+}
+
+.github-issue-title {
+  margin-top: -2px;
+  color: #1f2328;
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.github-issue-title span {
+  color: #57606a;
+  font-weight: 400;
+}
+
+.github-issue-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 1px 0 9px;
+  border-bottom: 1px solid #d0d7de;
+  color: #57606a;
+  font-size: 12px;
+}
+
+.github-issue-meta .issue-status {
+  border-color: #1a7f37;
+  background: #1f883d;
+  color: #fff;
+  font-size: 10px;
+}
+
+.github-comment {
+  display: grid;
+  gap: 6px;
+  padding: 11px 13px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.github-opening-comment {
+  border-color: #b6d2ed;
+}
+
+.github-comment-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #57606a;
+  font-size: 12px;
+}
+
+.github-comment-head strong {
+  color: #24292f;
+}
+
+.github-avatar {
+  display: inline-grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.avatar-rafales {
+  background: #8250df;
+}
+
+.avatar-yumike {
+  background: #0969da;
+}
+
+.github-comment p {
+  color: #24292f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.github-comment > code {
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #f6f8fa;
+  color: #24292f;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-comment p code {
+  color: #24292f;
+}
+
+.github-maintenance-comment {
+  border-style: dashed;
+  border-color: #9bb6d1;
+  background: #f6f9fd;
+}
+
+.github-issue-mock a {
+  color: #0969da;
+  font-size: 12px;
+}
+
+
+.issue-stage-number {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  color: #9aaabd;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.issue-source-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #314861;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.issue-status {
+  padding: 2px 7px;
+  border: 1px solid #8ac5a0;
+  border-radius: 999px;
+  background: #edf8f0;
+  color: #247044;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.issue-card-title {
+  color: #172f49;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.issue-card-title span {
+  color: #6b7a8f;
+  font-weight: 500;
+}
+
+.issue-brief-stage a {
+  align-self: end;
+  color: #275d9d;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.issue-brief-stage a:hover {
+  text-decoration: underline;
+}
+
+.issue-fact,
+.issue-mapping {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-left: 3px solid #6783a9;
+  background: #f4f7fb;
+  font-size: 12px;
+}
+
+.issue-knowledge-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.issue-knowledge-list > div {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid #dbe3ed;
+  border-radius: 4px;
+  background: #fbfcfe;
+}
+
+.issue-knowledge-list span {
+  color: #66778c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.issue-knowledge-list code {
+  overflow: hidden;
+  color: #1e3a5f;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-knowledge-list small {
+  grid-column: 1;
+  color: #66778c;
+  font-size: 11.5px;
+  line-height: 1.25;
+}
+
+.issue-fact span {
+  color: #66778c;
+}
+
+.issue-mapping {
+  justify-content: center;
+  border-left: 0;
+  border: 1px solid #dbe3ed;
+  background: #fff;
+  font-size: 14px;
+}
+
+.issue-mapping span {
+  color: #6f8196;
+}
+
+.issue-muted {
+  color: #66778c !important;
+}
+
+.issue-brief-stage blockquote {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #4563a8;
+  background: #fff;
+  color: #1e3a5f;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.issue-brief-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.task-brief-readonly {
+  min-height: auto;
+}
+
+.task-brief-overlay .issue-grounded-brief {
+  width: min(1160px, 100%);
+  padding: 20px 24px;
+}
+
+@media (max-width: 900px) {
+  .issue-grounded-brief {
+    min-height: auto;
+    width: min(100% - 24px, 720px);
+    padding: 20px;
+  }
+
+  .issue-brief-stages {
+    grid-template-columns: 1fr;
+  }
+
+  .issue-knowledge-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .issue-brief-header,
+  .issue-brief-flow {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .issue-brief-flow svg {
+    transform: rotate(-90deg);
+  }
+
+  .issue-knowledge-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 .participant-gate label {

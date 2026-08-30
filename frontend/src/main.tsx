@@ -1,6 +1,7 @@
 import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowDown, ArrowLeftRight, ArrowUp, CirclePlay, Loader2, Maximize2, Move, RefreshCw, ZoomIn, ZoomOut } from "lucide-react";
+import { flushSync } from "react-dom";
+import { ArrowDown, ArrowLeftRight, ArrowUp, BookOpenCheck, CirclePlay, Loader2, Maximize2, Move, RefreshCw, ZoomIn, ZoomOut } from "lucide-react";
 import { applyDragRerank, confirmReference, createManualLink, evaluateGeneration, finalizeReference, generateCode, getExperiments, loadCandidate, loadGenerationComparison, loadGraph, loadReferenceHint, loadSession, loadSessionBootstrap, loadTaskBrief, loadTokenPairAttribution, logEvent, resetInterventions, runGradientAttribution, setEventContext, startStudySession } from "./api";
 import type {
   CandidateDetail,
@@ -23,19 +24,21 @@ import type {
 import "./styles.css";
 
 const DEFAULT_TEST_ID = "";
-type AppMode = "demo" | "study" | "baseline";
+type AppMode = "demo" | "study" | "study_dev" | "baseline";
 const APP_MODE: AppMode = window.location.pathname.startsWith("/baseline")
   ? "baseline"
-  : window.location.pathname.startsWith("/study")
-    ? "study"
-    : "demo";
+  : window.location.pathname.startsWith("/study_dev")
+    ? "study_dev"
+    : window.location.pathname.startsWith("/study")
+      ? "study"
+      : "demo";
 const FOCUS_TEST_IDS = [DEFAULT_TEST_ID, "48", "1556", "1642", "2695", "3856", "954", "csn_9848", "csn_11087", "csn_11078", "csn_9406", "csn_400", "csn_13958", "csn_13527", "csn_8838", "csn_7664", "csn_2613", "csn_12213", "csn_11772", "csn_2812", "csn_7727", "csn_4772", "csn_10023", "csn_2207", "csn_5340", "csn_10164", "csn_13655", "csn_14175", "csn_10643", "csn_12075"];
-const GENERATION_CASE_IDS = new Set(["csn_8838", "csn_7664", "csn_2613", "csn_12213", "csn_11772"]);
+const GENERATION_CASE_IDS = new Set(["csn_8838", "csn_7664", "csn_2613", "csn_12213", "csn_11772", "csn_584"]);
 const GRAPH_WIDTH = 880;
 const GRAPH_HEIGHT = 560;
 const SUPPORT_QUERY_EVIDENCE_THRESHOLD = 0.55;
 const CONFLICT_QUERY_EVIDENCE_THRESHOLD = 0.35;
-const PREFETCH_GRAPH_LIMIT = 5;
+const CANDIDATE_PREFETCH_CONCURRENCY = 3;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -316,9 +319,93 @@ type HierarchyAnnotation = {
   leaderY: number;
 };
 
-function hierarchyAnnotationLayout(items: Array<{ id: string; x: number; y: number; width: number; height: number; placement?: "side" | "free" }>) {
+type HierarchyLayoutBox = { x: number; y: number; width: number; height: number };
+
+type GraphLabelLayoutItem = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  priority: number;
+};
+
+type GraphLabelPlacement = {
+  x: number;
+  y: number;
+  side: "left" | "right" | "top" | "bottom";
+};
+
+function graphLabelLayout(
+  items: GraphLabelLayoutItem[],
+  markerObstacles: HierarchyLayoutBox[]
+) {
   const padding = 8;
-  const occupied: Array<{ x: number; y: number; width: number; height: number }> = items.map((item) => ({ x: item.x - 15, y: item.y - 15, width: 30, height: 30 }));
+  const expand = (box: HierarchyLayoutBox, amount = 3): HierarchyLayoutBox => ({
+    x: box.x - amount,
+    y: box.y - amount,
+    width: box.width + amount * 2,
+    height: box.height + amount * 2
+  });
+  const overlapArea = (first: HierarchyLayoutBox, second: HierarchyLayoutBox) => {
+    const width = Math.max(0, Math.min(first.x + first.width, second.x + second.width) - Math.max(first.x, second.x));
+    const height = Math.max(0, Math.min(first.y + first.height, second.y + second.height) - Math.max(first.y, second.y));
+    return width * height;
+  };
+  const occupied = markerObstacles.map((box) => expand(box, 4));
+  const layout = new Map<string, HierarchyAnnotation>();
+  [...items]
+    .sort((first, second) => second.priority - first.priority || first.id.localeCompare(second.id))
+    .forEach((item) => {
+      const placements: GraphLabelPlacement[] = [
+        { x: item.x + 15, y: item.y - item.height / 2, side: "right" },
+        { x: item.x - item.width - 15, y: item.y - item.height / 2, side: "left" },
+        { x: item.x - item.width / 2, y: item.y - item.height - 15, side: "top" as const },
+        { x: item.x - item.width / 2, y: item.y + 15, side: "bottom" as const }
+      ];
+      const candidates = placements.map((candidate) => ({
+        ...candidate,
+        x: clamp(candidate.x, padding, GRAPH_WIDTH - item.width - padding),
+        y: clamp(candidate.y, padding, GRAPH_HEIGHT - item.height - padding),
+        width: item.width,
+        height: item.height
+      }));
+      const scored = candidates.map((candidate, index) => ({
+        candidate,
+        overlap: occupied.reduce((total, box) => total + overlapArea(candidate, box), 0),
+        index
+      })).sort((first, second) => first.overlap - second.overlap || first.index - second.index);
+      const chosen = scored[0];
+      // Labels stay adjacent to their node. If none of the four directions is
+      // clear, ordinary labels yield instead of becoming distant annotations.
+      if (!chosen || (chosen.overlap > 0 && item.priority < 1000)) return;
+      const labelY = chosen.candidate.y + 13;
+      const annotation: HierarchyAnnotation = chosen.candidate.side === "left"
+        ? { ...chosen.candidate, labelX: chosen.candidate.x + chosen.candidate.width, labelY, textAnchor: "end", leaderX: chosen.candidate.x + chosen.candidate.width + 5, leaderY: item.y }
+        : chosen.candidate.side === "right"
+          ? { ...chosen.candidate, labelX: chosen.candidate.x, labelY, textAnchor: "start", leaderX: chosen.candidate.x - 5, leaderY: item.y }
+          : { ...chosen.candidate, labelX: chosen.candidate.x + chosen.candidate.width / 2, labelY, textAnchor: "middle", leaderX: item.x, leaderY: chosen.candidate.side === "top" ? chosen.candidate.y + chosen.candidate.height + 5 : chosen.candidate.y - 5 };
+      layout.set(item.id, annotation);
+      occupied.push(expand(chosen.candidate));
+    });
+  return layout;
+}
+
+function hierarchyAnnotationLayout(
+  items: Array<{ id: string; x: number; y: number; width: number; height: number; placement?: "side" | "free" }>,
+  obstacles: HierarchyLayoutBox[] = []
+) {
+  const padding = 8;
+  const expand = (box: HierarchyLayoutBox, amount = 5): HierarchyLayoutBox => ({
+    x: box.x - amount,
+    y: box.y - amount,
+    width: box.width + amount * 2,
+    height: box.height + amount * 2
+  });
+  const occupied: HierarchyLayoutBox[] = [
+    ...obstacles.map((box) => expand(box)),
+    ...items.map((item) => ({ x: item.x - 17, y: item.y - 17, width: 34, height: 34 }))
+  ];
   const result = new Map<string, HierarchyAnnotation>();
   const overlapArea = (
     first: { x: number; y: number; width: number; height: number },
@@ -329,14 +416,17 @@ function hierarchyAnnotationLayout(items: Array<{ id: string; x: number; y: numb
     return width * height;
   };
   items.forEach((item) => {
-    const sideCandidates = [0, -20, 20].flatMap((verticalOffset) => [
+    const offsets = [0, -28, 28, -56, 56, -84, 84, -112, 112, -140, 140];
+    const sideCandidates = offsets.flatMap((verticalOffset) => [
       { x: item.x + 22, y: item.y - item.height / 2 + verticalOffset, side: "right" as const },
       { x: item.x - item.width - 22, y: item.y - item.height / 2 + verticalOffset, side: "left" as const }
     ]);
     const candidates = (item.placement === "side" ? sideCandidates : [
       ...sideCandidates,
-      { x: item.x - item.width / 2, y: item.y - item.height - 22, side: "top" as const },
-      { x: item.x - item.width / 2, y: item.y + 22, side: "bottom" as const }
+      ...[-22, -50, -78, -106].flatMap((offset) => [
+        { x: item.x - item.width / 2, y: item.y - item.height + offset, side: "top" as const },
+        { x: item.x - item.width / 2, y: item.y - offset, side: "bottom" as const }
+      ])
     ]).map((candidate) => ({
       x: clamp(candidate.x, padding, GRAPH_WIDTH - item.width - padding),
       y: clamp(candidate.y, padding, GRAPH_HEIGHT - item.height - padding),
@@ -347,7 +437,7 @@ function hierarchyAnnotationLayout(items: Array<{ id: string; x: number; y: numb
     const chosen = candidates
       .map((candidate, index) => ({
         candidate,
-        score: occupied.reduce((sum, box) => sum + overlapArea(candidate, box), 0) + index * 0.05
+        score: occupied.reduce((sum, box) => sum + overlapArea(candidate, box), 0) * 100 + index * 0.02
       }))
       .sort((first, second) => first.score - second.score)[0].candidate;
     const labelY = chosen.y + 14;
@@ -357,7 +447,7 @@ function hierarchyAnnotationLayout(items: Array<{ id: string; x: number; y: numb
         ? { ...chosen, labelX: chosen.x, labelY, textAnchor: "start", leaderX: chosen.x - 6, leaderY: item.y }
         : { ...chosen, labelX: chosen.x + chosen.width / 2, labelY, textAnchor: "middle", leaderX: item.x, leaderY: chosen.side === "top" ? chosen.y + chosen.height + 6 : chosen.y - 6 };
     result.set(item.id, annotation);
-    occupied.push(chosen);
+    occupied.push(expand(chosen));
   });
   return result;
 }
@@ -476,9 +566,27 @@ function HierarchicalCanvas({
     return Boolean(graphTokenLabel(node.label)) && selectedTokenIds.includes(tokenId);
   });
   const visibleCodeNodes = level === "block" ? blocks : lineNodes;
+  const hierarchyLabel = (node: { label?: string; lineNumber?: number; text?: string }) => {
+    if (level === "block") return node.label ?? "Block";
+    const text = `L${displayLineNumber(node.lineNumber ?? 0)} ${(node.text ?? "").trim()}`;
+    return text.length > 42 ? `${text.slice(0, 39)}...` : text;
+  };
+  const labelWidth = (text: string) => clamp(Math.ceil(text.length * 6.7 + 16), 110, 290);
+  const queryLabelObstacles = queryNodes.map((node) => {
+    const rawLabel = node.type === "query_concept" ? displayConceptText(node.label) : graphTokenLabel(node.label);
+    const label = rawLabel.length > 24 ? `${rawLabel.slice(0, 21)}...` : rawLabel;
+    const width = labelWidth(label);
+    const placeLeft = node.labelPlacement === "left" || node.x > GRAPH_WIDTH - 190;
+    return {
+      x: placeLeft ? node.x - width - 15 : node.x + 15,
+      y: node.y - 12,
+      width,
+      height: 22
+    };
+  });
   const annotationLayout = hierarchyAnnotationLayout([
-    ...visibleCodeNodes.map((node) => ({ id: node.id, x: node.x, y: node.y, width: 170, height: 24, placement: "free" as const }))
-  ]);
+    ...visibleCodeNodes.map((node) => ({ id: node.id, x: node.x, y: node.y, width: labelWidth(hierarchyLabel(node)), height: 22, placement: "free" as const }))
+  ], queryLabelObstacles);
   const hoveredBlock = blocks.find((block) => block.id === hoveredBlockId);
   const hoveredBlockTooltipX = hoveredBlock ? clamp(hoveredBlock.x + 16, 12, GRAPH_WIDTH - 208) : 0;
   const hoveredBlockTooltipY = hoveredBlock ? clamp(hoveredBlock.y - 46, 12, GRAPH_HEIGHT - 48) : 0;
@@ -558,14 +666,11 @@ function HierarchicalCanvas({
           const matches = lineWinners.get(line.id) ?? [];
           const x = line.x;
           const y = line.y;
-          const computedAnnotation = annotationLayout.get(line.id);
-          const annotation = candidate.testId === "csn_11087" && displayLineNumber(line.lineNumber) === 2
-            ? { labelX: x - 24, labelY: y + 4, textAnchor: "end" as const, leaderX: x - 16, leaderY: y }
-            : computedAnnotation;
+          const annotation = annotationLayout.get(line.id);
           return (
             <g key={line.lineNumber} className={selectedLine === line.lineNumber ? "hierarchy-node active" : "hierarchy-node"} onClick={() => onLine(line.lineNumber)}>
               <polygon points={trianglePoints(x, y, 13)} fill={hierarchyFill(`hierarchy-gradient-${line.id}`, matches)} />
-              {annotation ? <><line className="hierarchy-label-leader" x1={x} y1={y} x2={annotation.leaderX} y2={annotation.leaderY} /><text x={annotation.labelX} y={annotation.labelY} textAnchor={annotation.textAnchor} className="hierarchy-code-label">{`L${displayLineNumber(line.lineNumber)} ${line.text.trim()}`.length > 42 ? `${`L${displayLineNumber(line.lineNumber)} ${line.text.trim()}`.slice(0, 39)}...` : `L${displayLineNumber(line.lineNumber)} ${line.text.trim()}`}</text></> : null}
+              {annotation ? <><line className="hierarchy-label-leader" x1={x} y1={y} x2={annotation.leaderX} y2={annotation.leaderY} /><text x={annotation.labelX} y={annotation.labelY} textAnchor={annotation.textAnchor} className="hierarchy-code-label">{hierarchyLabel(line)}</text></> : null}
             </g>
           );
         })) : null}
@@ -914,7 +1019,8 @@ function QueryPanel({
   onDragMatch,
   externalImpacts,
   selectedExternalImpactKey,
-  onExternalImpact
+  onExternalImpact,
+  queryPointMode
 }: {
   session: SessionPayload | null;
   candidate: CandidateDetail | null;
@@ -928,7 +1034,8 @@ function QueryPanel({
   onDragMatch: (match: DragTokenMatch) => void;
   externalImpacts: ExternalImpact[];
   selectedExternalImpactKey: string | null;
-  onExternalImpact: (impact: ExternalImpact) => void;
+  onExternalImpact: (impact: ExternalImpact, conceptId?: number) => void;
+  queryPointMode: QueryPointMode;
 }) {
   const selectedConceptSet = useMemo(() => new Set(selectedConcepts), [selectedConcepts]);
   const selectedTokenSet = useMemo(() => new Set(selectedTokenIds), [selectedTokenIds]);
@@ -944,13 +1051,29 @@ function QueryPanel({
     return map;
   }, [session]);
 
-  if (!session) return <aside className="panel muted">No query loaded.</aside>;
+  if (!session) return <aside className="panel muted">No issue loaded.</aside>;
   const hasConceptFocus = selectedConcepts.length > 0 || selectedTokenIds.some((id) => id.startsWith("q_tok_"));
+  const showLocalDragDiagnostics = externalImpacts.length === 0;
   const lineTextByNumber = new Map((candidate?.codeLines ?? []).map((line) => [line.lineNumber, line.text]));
   const conceptById = new Map(session.query.concepts.map((concept) => [concept.conceptId, concept]));
+  const externalImpactDisplayItems = useMemo(() => {
+    if (queryPointMode === "tokens") {
+      return externalImpacts.map((impact) => ({ impact, concept: null }));
+    }
+    const grouped = new Map<string, { impact: ExternalImpact; concept: Concept }>();
+    externalImpacts.forEach((impact) => {
+      const concepts = session.query.concepts.filter((concept) => concept.tokenIndices.includes(impact.queryTokenIndex));
+      concepts.forEach((concept) => {
+        const key = `${concept.conceptId}:${impact.codeTokenIndex}`;
+        const existing = grouped.get(key);
+        if (!existing || Math.abs(impact.delta) > Math.abs(existing.impact.delta)) grouped.set(key, { impact, concept });
+      });
+    });
+    return [...grouped.values()].sort((first, second) => Math.abs(second.impact.delta) - Math.abs(first.impact.delta));
+  }, [externalImpacts, queryPointMode, session.query.concepts]);
   return (
     <aside className="panel query-panel">
-      <div className="panel-title">Query Concepts</div>
+      <div className="panel-title">Issue</div>
       <div className="query-text">{session.query.rawText}</div>
       <div className="query-token-list">
         {session.query.tokens.map((token, index) => {
@@ -972,6 +1095,7 @@ function QueryPanel({
           );
         })}
       </div>
+      <div className="issue-concept-title">Issue Concepts</div>
       <div className="concept-list">
         {session.query.concepts.map((concept) => (
           <button
@@ -984,7 +1108,7 @@ function QueryPanel({
           </button>
         ))}
       </div>
-      {dragLineMatches.length || dragTokenMatches.length ? (
+      {showLocalDragDiagnostics && (dragLineMatches.length || dragTokenMatches.length) ? (
         <div className="drag-change-panel">
           <div className="panel-title">{session.model?.id === "codebert" ? "Representation-level What-if" : "Drag Similarity Explanation"}</div>
           {session.model?.id === "codebert" ? <div className="meta-line">Counterfactual update over frozen contextual token states; ranks use the re-aggregated adapter representation.</div> : null}
@@ -1055,17 +1179,17 @@ function QueryPanel({
       {externalImpacts.length ? (
         <div className="drag-change-panel external-impact-panel">
           <div className="panel-title">External Representation Changes</div>
-          <div className="drag-change-caption">Affected code tokens</div>
+          <div className="drag-change-caption">{queryPointMode === "concept" ? "Affected code tokens by issue concept" : "Affected code tokens by issue token"}</div>
           <div className="drag-change-list">
-            {externalImpacts.slice(0, 10).map((impact) => {
+            {externalImpactDisplayItems.slice(0, 10).map(({ impact, concept }) => {
               const key = externalImpactKey(impact);
-              const queryToken = displayToken(session.query.tokens[impact.queryTokenIndex]);
+              const queryToken = concept ? displayConceptText(concept.text) : displayToken(session.query.tokens[impact.queryTokenIndex]);
               const codeToken = displayToken(candidate?.codeTokens[impact.codeTokenIndex]);
               return (
                 <button
-                  key={key}
+                  key={concept ? `${concept.conceptId}:${key}` : key}
                   className={selectedExternalImpactKey === key ? "drag-change-entry active external-impact-entry" : "drag-change-entry external-impact-entry"}
-                  onClick={() => onExternalImpact(impact)}
+                  onClick={() => onExternalImpact(impact, concept?.conceptId)}
                 >
                   <span className="drag-change-pair">
                     <strong>{queryToken || `q${impact.queryTokenIndex}`}</strong>
@@ -1090,13 +1214,13 @@ function QueryPanel({
 function BaselineQueryPanel({ session }: { session: SessionPayload | null }) {
   return (
     <aside className="panel query-panel baseline-query-panel">
-      <div className="panel-title">Query</div>
+      <div className="panel-title">Issue</div>
       {session ? (
         <>
           <div className="query-text">{session.query.rawText}</div>
           {session.query.metadata.path ? <div className="meta-line">{session.query.metadata.path}</div> : null}
         </>
-      ) : <div className="meta-line">No query loaded.</div>}
+      ) : <div className="meta-line">No issue loaded.</div>}
     </aside>
   );
 }
@@ -1137,8 +1261,8 @@ function CandidatePanel({
               {(candidate.dragSimilarity != null || candidate.rankDelta || candidate.similarityDelta) ? (
                 <small className={candidate.rankDelta && candidate.rankDelta > 0 ? "delta up" : "delta neutral"}>
                   {candidate.rankDelta && candidate.rankDelta > 0 ? <ArrowUp size={12} /> : candidate.rankDelta && candidate.rankDelta < 0 ? <ArrowDown size={12} /> : null}
-                  {candidate.corpusRank != null && candidate.corpusRank !== candidate.rank
-                    ? `Rank ${candidate.corpusRank} -> ${candidate.rank} (delta ${candidate.rankDelta && candidate.rankDelta > 0 ? "+" : ""}${candidate.rankDelta ?? 0})`
+                  {candidate.originalRank != null && candidate.originalRank !== candidate.rank
+                    ? `Rank ${candidate.originalRank} -> ${candidate.rank} (delta ${candidate.rankDelta && candidate.rankDelta > 0 ? "+" : ""}${candidate.rankDelta ?? 0})`
                     : `Rank delta ${candidate.rankDelta && candidate.rankDelta > 0 ? "+" : ""}${candidate.rankDelta ?? 0}`}
                   {candidate.similarityDelta != null ? ` · sim ${candidate.similarityDelta > 0 ? "+" : ""}${candidate.similarityDelta.toFixed(3)}` : ""}
                 </small>
@@ -1158,12 +1282,18 @@ function AdjudicationPanel({
   session,
   candidates,
   summaries,
-  showGroundTruth = true
+  showGroundTruth = true,
+  showEvidence = true,
+  choosingReference = false,
+  onChooseReference
 }: {
   session: SessionPayload;
   candidates: CandidateDetail[];
   summaries: Record<string, CandidateSummary>;
   showGroundTruth?: boolean;
+  showEvidence?: boolean;
+  choosingReference?: boolean;
+  onChooseReference: (candidate: CandidateDetail) => void;
 }) {
   const conceptById = useMemo(() => new Map(session.query.concepts.map((concept) => [concept.conceptId, concept])), [session.query.concepts]);
   if (candidates.length !== 2) return null;
@@ -1172,7 +1302,7 @@ function AdjudicationPanel({
       <div className="adjudication-header">
         <div>
           <div className="panel-title">Candidate Adjudication</div>
-          <small>Compare line-level concept evidence and uncovered implementation details.</small>
+          <small>{showEvidence ? "Compare line-level concept evidence and uncovered implementation details." : "Compare the two code references before selecting one for generation."}</small>
         </div>
       </div>
       <div className="adjudication-columns">
@@ -1182,13 +1312,16 @@ function AdjudicationPanel({
           return (
             <article key={candidate.id} className={`adjudication-candidate${showGroundTruth && session.model?.id !== "codebert" && summary?.isGroundTruth ? " ground-truth" : ""}`}>
               <div className="adjudication-candidate-title">
-                <strong>{summary?.metadata.funcName || candidate.metadata.funcName || candidate.id}</strong>
-                <span>Rank {summary?.rank ?? "-"} · sim {(summary?.similarity ?? candidate.similarity).toFixed(3)}</span>
+                <div>
+                  <strong>{summary?.metadata.funcName || candidate.metadata.funcName || candidate.id}</strong>
+                  <span>Rank {summary?.rank ?? "-"} · sim {(summary?.similarity ?? candidate.similarity).toFixed(3)}</span>
+                </div>
+                <button className="adjudication-reference-action" onClick={() => onChooseReference(candidate)} disabled={choosingReference}><BookOpenCheck size={13} /> Use as reference</button>
               </div>
               <div className="adjudication-lines">
                 {lines.map((line, index) => {
                   const matches = candidate.conceptMatches.filter((match) => match.codeTokenIndices.some((tokenIndex) => line.tokenIndices.includes(tokenIndex)));
-                  const uncovered = isAdjudicationUncoveredLine(line, matches);
+                  const uncovered = showEvidence && isAdjudicationUncoveredLine(line, matches);
                   const indentation = line.text.match(/^\s*/)?.[0].length ?? 0;
                   const matchColors = matches
                     .map((match) => conceptById.get(Number(match.conceptId))?.color)
@@ -1196,8 +1329,8 @@ function AdjudicationPanel({
                   return (
                     <div
                       key={line.lineNumber}
-                      className={`adjudication-line${matches.length ? " aligned" : ""}${uncovered ? " uncovered" : ""}`}
-                      style={matchColors.length && !uncovered ? {
+                      className={`adjudication-line${showEvidence && matches.length ? " aligned" : ""}${uncovered ? " uncovered" : ""}`}
+                      style={showEvidence && matchColors.length && !uncovered ? {
                         borderLeftColor: matchColors[0],
                         background: matchColors.length === 1
                           ? `${matchColors[0]}1f`
@@ -1841,8 +1974,10 @@ function CodeViewer({
             const conceptSelected = canvasLevel === "token" || canvasLevel === "line_tokens"
               ? tokenConceptSelected || hierarchyMatches.some((match) => selectedConceptSet.has(match.concept.conceptId))
               : hierarchyMatches.some((match) => selectedConceptSet.has(match.concept.conceptId));
-            const blockStart = block?.lineNumbers[0] === line.lineNumber;
-            const blockEnd = block?.lineNumbers[block.lineNumbers.length - 1] === line.lineNumber;
+            const visibleBlockLineNumbers = (block?.lineNumbers ?? []).filter((lineNumber) => displayLineNumberByRaw.has(lineNumber));
+            const blockLineNumbers = visibleBlockLineNumbers.length ? visibleBlockLineNumbers : block?.lineNumbers ?? [];
+            const blockStart = blockLineNumbers[0] === line.lineNumber;
+            const blockEnd = blockLineNumbers[blockLineNumbers.length - 1] === line.lineNumber;
             const levelActive = canvasLevel === "block"
               ? blockSelected || blockMatches.length > 0
               : isHierarchyDetail
@@ -1850,12 +1985,14 @@ function CodeViewer({
                 : lineSelected || conceptSelected;
             const indent = line.text.match(/^\s*/)?.[0] ?? "";
             const displayedLineNumber = displayLineNumberByRaw.get(line.lineNumber) ?? line.lineNumber;
+            const displayedBlockStart = displayLineNumberByRaw.get(blockLineNumbers[0] ?? 0) ?? blockLineNumbers[0];
+            const displayedBlockEnd = displayLineNumberByRaw.get(blockLineNumbers[blockLineNumbers.length - 1] ?? 0) ?? blockLineNumbers[blockLineNumbers.length - 1];
             return (
               <Fragment key={line.lineNumber}>
                 {canvasLevel === "block" && blockStart && block ? (
                   <div className={`code-block-label${blockSelected ? " selected" : ""}`} style={hierarchyColors.length ? { borderColor: hierarchyColors[0] } : undefined}>
                     <span>{block.label}</span>
-                    <span className="code-block-meta"><small>L{displayLineNumberByRaw.get(block.startLine) ?? block.startLine}-{displayLineNumberByRaw.get(block.endLine) ?? block.endLine}</small>{signalTexts.map((signalText) => <span key={signalText} className={`hierarchy-code-signal ${signalText === "weak concept evidence" ? "weak" : signalText === "uncovered code detail" ? "uncovered" : "latent"}`}>{signalText}</span>)}</span>
+                    <span className="code-block-meta"><small>L{displayedBlockStart}-{displayedBlockEnd}</small>{signalTexts.map((signalText) => <span key={signalText} className={`hierarchy-code-signal ${signalText === "weak concept evidence" ? "weak" : signalText === "uncovered code detail" ? "uncovered" : "latent"}`}>{signalText}</span>)}</span>
                   </div>
                 ) : null}
                 <div
@@ -2239,6 +2376,27 @@ function TokenVisualizationCanvas({
     () => new Map(conceptDisplayNodes.map((node) => [node.id, node.memberIds])),
     [conceptDisplayNodes]
   );
+  const conceptDisplayNodeById = useMemo(
+    () => new Map(conceptDisplayNodes.map((node) => [node.conceptId, node])),
+    [conceptDisplayNodes]
+  );
+  const externalImpactConnections = useMemo(() => {
+    if (queryPointMode === "tokens" || !session) {
+      return externalImpacts.map((impact) => ({ impact, queryNode: nodeById.get(`q_tok_${impact.queryTokenIndex}`) }));
+    }
+    const grouped = new Map<string, { impact: ExternalImpact; queryNode: GraphNode }>();
+    externalImpacts.forEach((impact) => {
+      const concepts = session.query.concepts.filter((concept) => concept.tokenIndices.includes(impact.queryTokenIndex));
+      concepts.forEach((concept) => {
+        const queryNode = conceptDisplayNodeById.get(concept.conceptId);
+        if (!queryNode) return;
+        const key = `${concept.conceptId}:${impact.codeTokenIndex}`;
+        const existing = grouped.get(key);
+        if (!existing || Math.abs(impact.delta) > Math.abs(existing.impact.delta)) grouped.set(key, { impact, queryNode });
+      });
+    });
+    return [...grouped.values()];
+  }, [externalImpacts, queryPointMode, session, nodeById, conceptDisplayNodeById]);
   const queryConceptTargetGroups = useMemo(() => {
     if (!session) return [];
     return session.query.concepts.map((concept) => ({
@@ -2372,46 +2530,79 @@ function TokenVisualizationCanvas({
       })
     : [];
   const zoomEmphasis = clamp((zoom - 1.4) / 3.2, 0, 1);
-  const visibleNodeIds = useMemo(() => {
-    if (!graph) return new Set<string>();
-    const candidates = graph.nodes.filter((node) => nodeIsVisible(node.id)).sort((a, b) => {
-      const selected = (node: GraphNode) => selectedTokenSet.has(node.id) || selectedTargetSet.has(node.id);
-      const suggested = (node: GraphNode) => showRecommendedTokens && canvasScope === "line" && node.type === "code_token" && recommendationTokenIndexSet.has(node.tokenIndex);
-      const suggestedQuery = (node: GraphNode) => showRecommendedTokens && canvasScope === "line" && node.type === "query_token" && node.conceptIds.some((id) => recommendationConceptIdSet.has(id));
-      const dragLinkedSuggestion = (node: GraphNode) => (canvasScope === "line" || canvasScope === "all") && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
-      const score = (node: GraphNode) => (
-        selected(node) ? 1000
-          : suggested(node) ? 950
-          : suggestedQuery(node) ? 945
-          : dragLinkedSuggestion(node) ? 940
-          : externalImpactByNode.has(node.id) ? 900
-          : isPunctuationToken(node.label) ? -100
-            : Number(node.highlightScore ?? 0)
-      );
-      return score(b) - score(a);
-    });
-    const occupied: Array<{ x: number; y: number; width: number; height: number }> = [];
-    const visible = new Set<string>();
-    const overlap = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) =>
-      Math.abs(a.x - b.x) < (a.width + b.width) / 2 && Math.abs(a.y - b.y) < (a.height + b.height) / 2;
-    candidates.forEach((node) => {
-      const point = pointFor(node);
+  const shouldShowGraphNodeLabel = (node: GraphNode) => {
+    if (!graphTokenLabel(node.label)) return false;
+    return canvasScope === "line"
+      || zoom > 1.85
+      || selectedTokenSet.has(node.id)
+      || selectedTargetSet.has(node.id)
+      || isNodeActive(node)
+      || (!hasFocus && node.type === "query_token");
+  };
+  const graphLabelAnnotations = useMemo(() => {
+    if (!graph) return new Map<string, HierarchyAnnotation>();
+    const isVisible = (nodeId: string) => !visibleNodeFilter || visibleNodeFilter.has(nodeId);
+    const markerObstacles = [
+      ...graph.nodes.filter((node) => isVisible(node.id)).map((node) => {
+        const point = dragPositions[node.id] ?? { x: node.x, y: node.y };
+        return { x: point.x - 11, y: point.y - 11, width: 22, height: 22 };
+      }),
+      ...conceptDisplayNodes.map((node) => ({ x: node.x - 12, y: node.y - 12, width: 24, height: 24 }))
+    ];
+    const items: GraphLabelLayoutItem[] = graph.nodes.flatMap((node) => {
+      if (!isVisible(node.id) || !shouldShowGraphNodeLabel(node)) return [];
+      const point = dragPositions[node.id] ?? { x: node.x, y: node.y };
+      const selected = selectedTokenSet.has(node.id) || selectedTargetSet.has(node.id);
+      const active = isNodeActive(node);
+      const suggested = showRecommendedTokens && canvasScope === "line" && (
+        (node.type === "code_token" && recommendationTokenIndexSet.has(node.tokenIndex))
+        || (node.type === "query_token" && node.conceptIds.some((id) => recommendationConceptIdSet.has(id))));
+      const linked = (canvasScope === "line" || canvasScope === "all")
+        && node.type === "code_token"
+        && linkedSuggestionTokenIndices.has(node.tokenIndex);
+      const priority = selected ? 1100 : active ? 1000 : suggested || linked ? 900 : externalImpactByNode.has(node.id) ? 850 : node.type === "query_token" ? 700 : 200;
       const label = graphTokenLabel(node.label);
-      const radius = node.type === "query_token" ? 7 : 8;
-      const width = Math.max(radius * 2, (label.length * 6.2 + (label ? 18 : 0)) / zoom);
-      const height = (label ? 18 : radius * 2) / zoom;
-      const box = { x: point.x + (label ? width / 2 - radius : 0), y: point.y, width, height };
-      const suggested = showRecommendedTokens && canvasScope === "line" && node.type === "code_token" && recommendationTokenIndexSet.has(node.tokenIndex);
-      const suggestedQuery = showRecommendedTokens && canvasScope === "line" && node.type === "query_token" && node.conceptIds.some((id) => recommendationConceptIdSet.has(id));
-      const dragLinkedSuggestion = (canvasScope === "line" || canvasScope === "all") && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
-      const priorityNode = selectedTokenSet.has(node.id) || selectedTargetSet.has(node.id) || suggested || suggestedQuery || dragLinkedSuggestion;
-      if (priorityNode || !occupied.some((item) => overlap(box, item))) {
-        visible.add(node.id);
-        occupied.push(box);
-      }
+      return [{ id: node.id, x: point.x, y: point.y, width: Math.max(34, label.length * 6.4 + 8), height: 18, priority }];
     });
-    return visible;
-  }, [graph, dragPositions, zoom, selectedTokenSet, selectedTargetSet, externalImpactByNode, visibleNodeFilter, showRecommendedTokens, canvasScope, recommendationTokenIndexSet, recommendationConceptIdSet, dragMode, linkedSuggestionTokenIndices]);
+    conceptDisplayNodes.forEach((node) => {
+      const members = conceptDisplayMembers.get(node.id) ?? [];
+      const selected = selectedConceptSet.has(node.conceptId) || members.some((id) => selectedTargetSet.has(id));
+      const label = displayConceptText(node.label);
+      if (!label) return;
+      items.push({
+        id: node.id,
+        x: node.x,
+        y: node.y,
+        width: Math.max(44, label.length * 6.8 + 10),
+        height: 20,
+        priority: selected ? 1120 : 1000
+      });
+    });
+    return graphLabelLayout(items, markerObstacles);
+  }, [
+    graph,
+    visibleNodeFilter,
+    dragPositions,
+    conceptDisplayNodes,
+    conceptDisplayMembers,
+    selectedConceptSet,
+    selectedTokenSet,
+    selectedTargetSet,
+    selectedLineSet,
+    selectedConcepts,
+    selectedLines,
+    selectedTokenIds,
+    linkDraft,
+    neighborSignals,
+    showRecommendedTokens,
+    canvasScope,
+    recommendationTokenIndexSet,
+    recommendationConceptIdSet,
+    linkedSuggestionTokenIndices,
+    externalImpactByNode,
+    zoom,
+    hasFocus
+  ]);
 
   function semanticNeighborsFor(nodeId: string) {
     if (!graph) return [];
@@ -2766,11 +2957,10 @@ function TokenVisualizationCanvas({
             />
           );
         })}
-        {!neighborMode && externalImpacts.map((impact, index) => {
+        {!neighborMode && externalImpactConnections.map(({ impact, queryNode }, index) => {
           const queryTokenIndex = impact.queryTokenIndex;
           const codeNode = nodeById.get(`c_tok_${impact.codeTokenIndex}`);
-          const queryNode = nodeById.get(`q_tok_${queryTokenIndex}`);
-          if (!codeNode || !queryNode || !nodeIsVisible(codeNode.id) || !nodeIsVisible(queryNode.id)) return null;
+          if (!codeNode || !queryNode || !nodeIsVisible(codeNode.id)) return null;
           const sourcePoint = pointFor(codeNode);
           const targetPoint = pointFor(queryNode);
           const dx = targetPoint.x - sourcePoint.x;
@@ -2832,7 +3022,6 @@ function TokenVisualizationCanvas({
             return priority(a) - priority(b);
           })
           .map((node) => {
-          if (!visibleNodeIds.has(node.id)) return null;
           const active = isNodeActive(node);
           const isQuery = node.type === "query_token";
           const signal = neighborSignals[node.id];
@@ -2864,9 +3053,7 @@ function TokenVisualizationCanvas({
                 ? 0.34 + zoomEmphasis * 0.22
                 : 0.68 + zoomEmphasis * 0.22;
           const label = graphTokenLabel(node.label);
-          const showLabel = Boolean(label) && (canvasScope === "line"
-            ? visibleNodeIds.has(node.id)
-            : zoom > 1.85 || selectedDirectly || selectedTarget || active || (!hasFocus && node.type === "query_token"));
+          const annotation = graphLabelAnnotations.get(node.id);
           const markerScale = selectedDirectly || selectedTarget ? 1.08 : localNeighbor ? 1.04 + zoomEmphasis * 0.12 : 1 + zoomEmphasis * 0.08;
           const queryRadius = (active ? 8 : 5) * markerScale;
           const codeRadius = (active ? 9 : 6) * markerScale;
@@ -2932,11 +3119,10 @@ function TokenVisualizationCanvas({
                   strokeWidth={selectedDirectly || selectedTarget ? 3.2 : active ? 2.5 : 1}
                 />
               )}
-              {showLabel ? (
-                <text x={point.x + 9} y={point.y + 4}>
-                  {label}
-                </text>
-              ) : null}
+              {annotation ? <>
+                <line className="hierarchy-label-leader" x1={point.x} y1={point.y} x2={annotation.leaderX} y2={annotation.leaderY} />
+                <text x={annotation.labelX} y={annotation.labelY} textAnchor={annotation.textAnchor}>{label}</text>
+              </> : null}
               <title>{displayToken(node.label)}</title>
             </g>
           );
@@ -2946,6 +3132,7 @@ function TokenVisualizationCanvas({
           const active = selectedConceptSet.has(node.conceptId) || members.some((id) => selectedTargetSet.has(id));
           const point = { x: node.x, y: node.y };
           const label = displayConceptText(node.label);
+          const annotation = graphLabelAnnotations.get(node.id);
           return (
             <g
               key={node.id}
@@ -2967,7 +3154,10 @@ function TokenVisualizationCanvas({
                 stroke="#17202a"
                 strokeWidth={active ? 2.8 : 1.4}
               />
-              {label ? <text x={point.x + 12} y={point.y + 4}>{label}</text> : null}
+              {label && annotation ? <>
+                <line className="hierarchy-label-leader" x1={point.x} y1={point.y} x2={annotation.leaderX} y2={annotation.leaderY} />
+                <text x={annotation.labelX} y={annotation.labelY} textAnchor={annotation.textAnchor}>{label}</text>
+              </> : null}
               <title>{label}</title>
             </g>
           );
@@ -3008,6 +3198,147 @@ function TokenVisualizationCanvas({
 
 function TaskBriefPanel({ brief, onConfirm, onClose, ready = true }: { brief: TaskBrief; onConfirm: () => void; onClose?: () => void; ready?: boolean }) {
   const [acknowledged, setAcknowledged] = useState(false);
+  if (brief.caseId === "csn_11772") {
+    return <section className={`panel task-brief-panel issue-grounded-brief ${onClose ? "task-brief-readonly" : ""}`}>
+      <div className="issue-brief-header">
+        <div>
+          <div className="issue-brief-kicker">Task Brief · CSN 11772</div>
+          <h2>理解项目已有知识，并选择一段可帮助后续实现的参考代码。</h2>
+        </div>
+        {onClose ? <button onClick={onClose}>Close</button> : null}
+      </div>
+
+      <div className="issue-brief-stages">
+        <section className="issue-brief-stage">
+          <div className="issue-stage-number">01</div>
+          <div className="github-issue-mock">
+            <div className="github-repo">gears <span>/</span> gears</div>
+            <div className="github-issue-title">Less support <span>#11</span></div>
+            <div className="github-issue-meta"><span className="issue-status">Open</span><span>rafales opened this issue · May 16, 2012 · 4 comments</span></div>
+            <div className="github-comment github-opening-comment">
+              <div className="github-comment-head"><span className="github-avatar avatar-rafales">r</span><strong>rafales</strong><span>commented</span></div>
+              <p>LESS files are compiled to CSS before later build operations. The current path makes LESS imports and shared variables difficult to preserve.</p>
+              <code>@import "other_file.css.less"</code>
+            </div>
+            <div className="github-comment">
+              <div className="github-comment-head"><span className="github-avatar avatar-yumike">y</span><strong>yumike</strong><span>commented</span></div>
+              <p>Gears should support simple source extensions such as <code>.less</code>, while the compiler integration remains separate.</p>
+            </div>
+            <div className="github-comment github-maintenance-comment">
+              <div className="github-comment-head"><span className="github-avatar avatar-rafales">r</span><strong>rafales</strong><span>follow-up</span></div>
+              <p>For compiled assets, the source filename and the compiler-produced content can carry different format information. The related <code>AssetAttributes</code> maintenance work needs to understand how Gears represents those details before extending its behavior.</p>
+            </div>
+            <a href="https://github.com/gears/gears/issues/11" target="_blank" rel="noreferrer">View original issue ↗</a>
+          </div>
+        </section>
+
+        <section className="issue-brief-stage">
+          <div className="issue-stage-number">02</div>
+          <h3>同一案例中的领域知识</h3>
+          <p>以 <code>styles/site.css.less</code> 为例，下面是开发者在代码库中能够获得的格式信息。</p>
+          <div className="issue-knowledge-list">
+            <div><span>Source extension</span><code>.less</code><small>源资源使用 LESS</small></div>
+            <div><span>Compiler</span><code>LESS compiler</code><small>将源内容转换为 CSS</small></div>
+            <div><span>Output MIME</span><code>compiler_mimetype = "text/css"</code><small>若不可用则可能为 <code>None</code></small></div>
+            <div><span>Environment mapping</span><code>.css ↔ text/css</code><small>项目已有的格式约定</small></div>
+          </div>
+          <p className="issue-muted">这些信息来自同一个 asset 的文件名、compiler 和环境配置；它们在项目代码中如何协同，需要通过检索已有实现来判断。</p>
+        </section>
+
+        <section className="issue-brief-stage">
+          <div className="issue-stage-number">03</div>
+          <h3>你的开发任务</h3>
+          <p>你正在接手一项相关维护工作，需要先理解项目如何连接 asset format、compiler 与 environment 中的格式信息。</p>
+          <div className="issue-query-label">Issue</div>
+          <blockquote>{brief.taskQuery}</blockquote>
+          <p>系统将提供 20 个候选代码片段；目标实现不在候选中。请选择一段最值得作为后续代码生成参考的 Reference，而不是寻找现成答案。</p>
+        </section>
+      </div>
+
+      {!onClose ? <div className="issue-brief-actions">
+        <label className="task-brief-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> 我已阅读任务背景，并理解需要选择一个最有助于后续生成的 Reference。</label>
+        <button className={`task-brief-enter ${acknowledged && ready ? "ready" : ""}`} onClick={onConfirm} disabled={!acknowledged || !ready}>{ready ? acknowledged ? "进入任务" : "确认理解后进入任务" : "正在准备检索工作区..."}</button>
+      </div> : null}
+    </section>;
+  }
+  if (brief.caseId === "csn_584") {
+    return <section className={`panel task-brief-panel issue-grounded-brief ${onClose ? "task-brief-readonly" : ""}`}>
+      <div className="issue-brief-header">
+        <div>
+          <div className="issue-brief-kicker">Task Brief · CSN 584</div>
+          <h2>理解 RandomPerspective 所需的几何参数，并选择一段可帮助后续实现的参考代码。</h2>
+        </div>
+        {onClose ? <button onClick={onClose}>Close</button> : null}
+      </div>
+
+      <div className="issue-brief-stages">
+        <section className="issue-brief-stage">
+          <div className="issue-stage-number">01</div>
+          <div className="github-issue-mock">
+            <div className="github-repo">pytorch <span>/</span> vision</div>
+            <div className="github-issue-title">[Feature request] Add perspective transform <span>#779</span></div>
+            <div className="github-issue-meta"><span className="issue-status">Closed</span><span>fmassa opened this issue · Mar 8, 2019</span><span>enhancement · help wanted</span></div>
+            <div className="github-comment github-opening-comment">
+              <div className="github-comment-head"><span className="github-avatar avatar-yumike">f</span><strong>fmassa</strong><span>opened this issue</span></div>
+              <p>TorchVision does not yet expose a perspective image transform. Pillow already provides the underlying operation, so torchvision needs an interface that fits its transform pipeline.</p>
+            </div>
+            <div className="github-comment">
+              <div className="github-comment-head"><span className="github-avatar avatar-rafales">f</span><strong>fmassa</strong><span>reviewed PR #781</span></div>
+              <p>Passing low-level perspective coefficients directly would make the transform difficult to reason about. A clearer interface is to describe the transformation with two quadrilaterals and let the functional implementation handle the lower-level coefficients.</p>
+            </div>
+            <div className="github-comment">
+              <div className="github-comment-head"><span className="github-avatar avatar-yumike">s</span><strong>surgan12</strong><span>replied</span></div>
+              <p>The perspective interface can use two quadrilaterals as its geometric input.</p>
+            </div>
+            <div className="github-comment">
+              <div className="github-comment-head"><span className="github-avatar avatar-yumike">s</span><strong>surgan12</strong><span>follow-up</span></div>
+              <p>For the random transform, the transform layer can generate random destination vertices and pass the resulting geometry to the functional perspective operation.</p>
+            </div>
+            <div className="github-comment">
+              <div className="github-comment-head"><span className="github-avatar avatar-rafales">f</span><strong>fmassa</strong><span>follow-up</span></div>
+              <p>Users should be able to control how strong the random perspective distortion can be. Small values should keep the transformed geometry close to the original image, while larger values may allow stronger distortion.</p>
+              <code>Review outcome · distortion_scale</code>
+            </div>
+            <div className="github-comment github-maintenance-comment">
+              <div className="github-comment-head"><strong>Maintenance context</strong></div>
+              <p>The API design now makes a useful distinction: the RandomPerspective layer produces geometric parameters, while downstream perspective code consumes those parameters to perform the image transformation.</p>
+              <p>The current maintenance task is to understand what parameter structure the repository expects before implementing the random parameter-generation step.</p>
+            </div>
+            <a href="https://github.com/pytorch/vision/issues/779" target="_blank" rel="noreferrer">View original issue ↗</a>
+            <a href="https://github.com/pytorch/vision/pull/781" target="_blank" rel="noreferrer">View implementation PR ↗</a>
+          </div>
+        </section>
+
+        <section className="issue-brief-stage">
+          <div className="issue-stage-number">02</div>
+          <h3>同一案例中的项目知识</h3>
+          <p>下面沿用同一个 RandomPerspective 场景，说明开发者在进入代码检索前需要掌握的几何表示与 API 信息。</p>
+          <div className="issue-knowledge-list">
+            <div><span>Image geometry</span><code>width = 12 · height = 10</code><small>图像坐标以左上角为原点；宽高决定原图四个边界角点的位置。TL · TR · BR · BL</small></div>
+            <div><span>Perspective parameters</span><code>startpoints · endpoints</code><small>两组四个二维角点分别描述原图几何与变换后的几何，并保持相同角点顺序。</small></div>
+            <div><span>Random distortion</span><code>distortion_scale = 0.5</code><small>控制允许的透视变化强度；较小值更接近原图，较大值允许更强的变换。</small></div>
+            <div><span>Downstream transform</span><code>point sets → coefficients → perspective transform</code><small>下游 perspective 代码消费两组点，并将几何信息转换为执行图像变换所需的数据。</small></div>
+          </div>
+          <p className="issue-muted">这些信息定义了 RandomPerspective 需要产生的数据类型与高层语义；具体如何根据图像尺寸和 distortion_scale 构造一组有效的随机参数，需要通过检索项目已有实现进一步判断。</p>
+        </section>
+
+        <section className="issue-brief-stage">
+          <div className="issue-stage-number">03</div>
+          <h3>你的开发任务</h3>
+          <p>你正在接手 TorchVision 中 RandomPerspective 的一项相关维护工作。现有 API 已使用 startpoints 和 endpoints 描述 perspective geometry，并允许通过 distortion_scale 控制随机变换强度。现在需要实现负责生成这些 perspective parameters 的部分。</p>
+          <p>你希望先理解项目中这些参数如何被下游代码使用，以及一组有效参数需要满足怎样的结构关系，因此决定检索已有实现并选择一个参考代码。</p>
+          <div className="issue-query-label">Issue</div>
+          <blockquote>{brief.taskQuery}</blockquote>
+          <p>系统将提供 20 个候选代码片段；目标实现不在候选中。请选择一段最值得作为后续代码生成参考的 Reference，而不是寻找现成答案。</p>
+        </section>
+      </div>
+
+      {!onClose ? <div className="issue-brief-actions">
+        <label className="task-brief-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> 我已阅读任务背景，并理解需要选择一个最有助于后续生成的 Reference。</label>
+        <button className={`task-brief-enter ${acknowledged && ready ? "ready" : ""}`} onClick={onConfirm} disabled={!acknowledged || !ready}>{ready ? acknowledged ? "进入任务" : "确认理解后进入任务" : "正在准备检索工作区..."}</button>
+      </div> : null}
+    </section>;
+  }
   return <section className="panel task-brief-panel">
     <div className="generation-header">
       <div><div className="panel-title">Task Brief</div><p>{brief.role}</p></div>
@@ -3015,8 +3346,13 @@ function TaskBriefPanel({ brief, onConfirm, onClose, ready = true }: { brief: Ta
     </div>
     {brief.sections?.length ? brief.sections.map((section) => <section key={section.heading}>
       <h3>{section.heading}</h3>
-      {section.paragraphs?.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
-      {section.codeBlocks?.map((block) => <pre key={block.content} className="task-brief-code"><code>{block.content}</code></pre>)}
+      {section.content?.length ? section.content.map((item, index) => item.type === "paragraph"
+        ? <p key={`${section.heading}-paragraph-${index}`}>{item.text}</p>
+        : <pre key={`${section.heading}-code-${index}`} className="task-brief-code"><code>{item.content}</code></pre>
+      ) : <>
+        {section.paragraphs?.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+        {section.codeBlocks?.map((block) => <pre key={block.content} className="task-brief-code"><code>{block.content}</code></pre>)}
+      </>}
       {section.bullets?.length ? <ul className="task-brief-bullets">{section.bullets.map((item) => <li key={item}>{item}</li>)}</ul> : null}
     </section>) : <>
       <section><h3>系统背景</h3><p>{brief.systemContext}</p></section>
@@ -3145,17 +3481,17 @@ function GenerationPanel({
           </section>
         </div> : <pre>{result.generatedCode}</pre>}
       </div> : null}
-      {showInternal && evaluation ? <div className={`generation-evaluation ${evaluation.status}`}>
+      {evaluation ? <div className={`generation-evaluation ${evaluation.status}`}>
         <div className="panel-title">Evaluation</div>
         <div className="evaluation-summary">
           {evaluation.status === "ok" ? <strong>Functional tests: {evaluation.testsPassed} / {evaluation.testsTotal} passed · {Math.round((evaluation.passRate ?? 0) * 100)}%</strong> : <span>Functional tests: unavailable on this server. {evaluation.message}</span>}
         </div>
-        {evaluation.apiPrecision != null && evaluation.apiRecall != null ? <div className="evaluation-metrics">
+        {showInternal && evaluation.apiPrecision != null && evaluation.apiRecall != null ? <div className="evaluation-metrics">
           <div><span>API precision</span><strong>{(evaluation.apiPrecision * 100).toFixed(1)}%</strong></div>
           <div><span>API recall</span><strong>{(evaluation.apiRecall * 100).toFixed(1)}%</strong></div>
           <div><span>API F1</span><strong>{((evaluation.apiF1 ?? 0) * 100).toFixed(1)}%</strong></div>
         </div> : null}
-        {evaluation.generatedApis?.length || evaluation.groundTruthApis?.length ? <div className="evaluation-api-sets">
+        {showInternal && (evaluation.generatedApis?.length || evaluation.groundTruthApis?.length) ? <div className="evaluation-api-sets">
           <span>Generated APIs: {evaluation.generatedApis?.join(", ") || "none"}</span>
           <span>GT APIs: {evaluation.groundTruthApis?.join(", ") || "none"}</span>
         </div> : null}
@@ -3164,9 +3500,40 @@ function GenerationPanel({
             <strong>{test.passed ? "Pass" : "Fail"}</strong><span>{test.name}</span>{test.error ? <small>{test.error}</small> : null}
           </div>)}
         </div> : null}
-        {evaluation.matchedApis?.length ? <div className="evaluation-api-match">Matched APIs: {evaluation.matchedApis.join(", ")}</div> : null}
+        {showInternal && evaluation.matchedApis?.length ? <div className="evaluation-api-match">Matched APIs: {evaluation.matchedApis.join(", ")}</div> : null}
       </div> : null}
       {showMeasures && finalized ? <PostTaskMeasures onSubmit={onSubmitMeasures} /> : null}
+    </section>
+  );
+}
+
+function GenerationOpeningPanel({
+  candidate,
+  query,
+  onBack
+}: {
+  candidate: CandidateDetail | null;
+  query: string;
+  onBack: () => void;
+}) {
+  return (
+    <section className="panel generation-panel generation-opening-panel">
+      <div className="generation-header">
+        <div>
+          <div className="panel-title">Generate From Selected Reference</div>
+          <p>{query}</p>
+        </div>
+        <button onClick={onBack}>Back to Retrieval</button>
+      </div>
+      {candidate ? <div className="generation-context">
+        <div className="panel-title">Selected Reference</div>
+        <div className="generation-context-meta"><strong>{candidate.metadata.funcName || candidate.id}</strong></div>
+        <details open>
+          <summary>View selected retrieved code</summary>
+          <pre className="generation-context-code">{withoutLeadingFunctionDocstring(candidate.rawCode)}</pre>
+        </details>
+      </div> : null}
+      <div className="generation-opening-status"><Loader2 size={16} className="spin" /> Registering this selection...</div>
     </section>
   );
 }
@@ -3181,6 +3548,7 @@ function App() {
   const [modelId, setModelId] = useState("xsearch");
   const [session, setSession] = useState<SessionPayload | null>(null);
   const [candidate, setCandidate] = useState<CandidateDetail | null>(null);
+  const [activeCandidateId, setActiveCandidateId] = useState<string | null>(null);
   const [graph, setGraph] = useState<VisualizationGraph | null>(null);
   const [selectedConcepts, setSelectedConcepts] = useState<number[]>([]);
   const [selectedLines, setSelectedLines] = useState<number[]>([]);
@@ -3219,6 +3587,8 @@ function App() {
   useEffect(() => {
     document.title = appMode === "study"
       ? "Interactive RAG User Study"
+      : appMode === "study_dev"
+        ? "Interactive RAG Study Development"
       : appMode === "baseline"
         ? "Interactive RAG Baseline"
         : "Interactive RAG";
@@ -3241,6 +3611,7 @@ function App() {
   const [retrievalLocked, setRetrievalLocked] = useState(false);
   const [generationMode, setGenerationMode] = useState(false);
   const [generationConfirmation, setGenerationConfirmation] = useState<GenerationConfirmation | null>(null);
+  const [generationOpeningCandidate, setGenerationOpeningCandidate] = useState<CandidateDetail | null>(null);
   const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
   const [generationComparison, setGenerationComparison] = useState<GenerationComparison | null>(null);
   const [generationEvaluation, setGenerationEvaluation] = useState<GenerationEvaluation | null>(null);
@@ -3253,11 +3624,13 @@ function App() {
   const [taskBrief, setTaskBrief] = useState<TaskBrief | null>(null);
   const [briefConfirmed, setBriefConfirmed] = useState(true);
   const [briefWorkspaceReady, setBriefWorkspaceReady] = useState(false);
+  const [briefLoading, setBriefLoading] = useState(false);
   const [briefOpen, setBriefOpen] = useState(false);
   const [referenceHint, setReferenceHint] = useState<ReferenceHint | null>(null);
   const [hintLoading, setHintLoading] = useState(false);
   const hintOpenedAtRef = useRef<number | null>(null);
   const loadRequestRef = useRef(0);
+  const generationPreviewRequestRef = useRef(0);
 
   useEffect(() => {
     if (isDemo) return;
@@ -3274,8 +3647,9 @@ function App() {
     getExperiments()
       .then((data) => {
         if (!isDemo) {
-          setTests(["csn_11772"]);
-          if (testId !== "csn_11772") setTestId("csn_11772");
+          const studyTests = ["csn_11772", "csn_584"];
+          setTests(studyTests);
+          setTestId((currentTestId) => studyTests.includes(currentTestId) ? currentTestId : studyTests[0]);
           return;
         }
         const focused = FOCUS_TEST_IDS.filter((id) => data.tests.includes(id));
@@ -3284,7 +3658,7 @@ function App() {
         if (testId && !visibleTests.includes(testId) && visibleTests.length) setTestId(visibleTests[0]);
       })
       .catch((err) => setError(String(err)));
-  }, []);
+  }, [appMode, isDemo]);
 
   function clearGradientTrace() {
     setGradientAttribution(null);
@@ -3351,17 +3725,25 @@ function App() {
     const ordered = [
       ...payload.candidates.filter((item) => item.isGroundTruth && item.id !== firstCandidateId),
       ...payload.candidates.filter((item) => !item.isGroundTruth && item.id !== firstCandidateId)
-    ];
-    for (const [index, item] of ordered.entries()) {
-      if (generation !== cacheGenerationRef.current) return;
-      try {
-        await getCandidateDetail(payload.testId, item.id);
-        if (generation !== cacheGenerationRef.current) return;
-        if (index < PREFETCH_GRAPH_LIMIT) await getVisualizationGraph(payload.testId, item.id);
-      } catch {
-        // A failed background preload must not block the interactive session.
+    ].filter((item) => {
+      const detailKey = payloadCacheKey(payload.testId, item.id);
+      return !candidateDetailCacheRef.current[detailKey] || !graphCacheRef.current[payloadCacheKey(payload.testId, item.id)];
+    });
+    let cursor = 0;
+    const warmOne = async () => {
+      while (generation === cacheGenerationRef.current && cursor < ordered.length) {
+        const item = ordered[cursor++];
+        try {
+          await Promise.all([
+            getCandidateDetail(payload.testId, item.id),
+            getVisualizationGraph(payload.testId, item.id)
+          ]);
+        } catch {
+          // A failed background preload must not block the interactive session.
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: CANDIDATE_PREFETCH_CONCURRENCY }, warmOne));
   }
 
   async function loadAll(nextTestId = testId) {
@@ -3373,6 +3755,7 @@ function App() {
     setLoadingStep(`Resetting ${nextTestId}`);
     setError(null);
     setCandidate(null);
+    setActiveCandidateId(null);
     setGraph(null);
     setRetrievalLocked(false);
     setGenerationMode(false);
@@ -3387,6 +3770,7 @@ function App() {
     setTaskBrief(null);
     setBriefConfirmed(true);
     setBriefWorkspaceReady(false);
+    setBriefLoading(true);
     setBriefOpen(false);
     const attemptId = createClientId("attempt");
     setCaseAttemptId(attemptId);
@@ -3397,6 +3781,7 @@ function App() {
       const bootstrapRequest = loadSessionBootstrap(nextTestId, modelId);
       const brief = await briefRequest;
       if (requestId !== loadRequestRef.current) return;
+      setBriefLoading(false);
       if (brief) {
         setTaskBrief(brief);
         setBriefConfirmed(false);
@@ -3412,7 +3797,14 @@ function App() {
       if (!first) throw new Error("No candidates available for this test.");
       candidateDetailCacheRef.current[payloadCacheKey(nextTestId, first.id)] = bootstrap.candidate;
       graphCacheRef.current[payloadCacheKey(nextTestId, first.id)] = bootstrap.graph;
+      Object.entries(bootstrap.prefetched?.candidates ?? {}).forEach(([candidateId, detail]) => {
+        candidateDetailCacheRef.current[payloadCacheKey(nextTestId, candidateId)] = detail;
+      });
+      Object.entries(bootstrap.prefetched?.graphs ?? {}).forEach(([candidateId, nextGraph]) => {
+        graphCacheRef.current[payloadCacheKey(nextTestId, candidateId)] = nextGraph;
+      });
       setCandidate(bootstrap.candidate);
+      setActiveCandidateId(first.id);
       setGraph(bootstrap.graph);
       setBriefWorkspaceReady(true);
       setAdjudicationIds([]);
@@ -3446,23 +3838,33 @@ function App() {
       setLoading(false);
       setLoadingStep(null);
       logEvent("task_start", { testId: nextTestId, candidateId: first.id, retrievalModel: modelId });
-      void prefetchRankedCandidates(loaded, first.id, cacheGeneration);
+      window.setTimeout(() => void prefetchRankedCandidates(loaded, first.id, cacheGeneration), 250);
     } catch (err) {
       setError(isUnavailableTokenError(err) ? null : err instanceof Error ? err.message : String(err));
       if (requestId === loadRequestRef.current) setLoadingStep(null);
     } finally {
-      if (requestId === loadRequestRef.current) setLoading(false);
+      if (requestId === loadRequestRef.current) {
+        setLoading(false);
+        setBriefLoading(false);
+      }
     }
   }
 
   async function selectCandidate(next: CandidateSummary) {
     if (!session || retrievalLocked || !briefConfirmed) return;
+    if (activeCandidateId === next.id) return;
     if (candidate) logEvent("candidate_close", { testId: session.testId, candidateId: candidate.id });
     const requestId = ++loadRequestRef.current;
-    setLoading(true);
+    const previousCandidateId = candidate?.id ?? null;
+    const hasDragEdits = Object.values(dragPositionsByCandidate).some((positions) => Object.keys(positions).length > 0)
+      || Object.values(dragTrailsByCandidate).some((trails) => Object.values(trails).some((trail) => trail.length > 1));
+    flushSync(() => {
+      setActiveCandidateId(next.id);
+      setLoading(true);
+      if (hasDragEdits) setCanvasLevel("token");
+    });
     setGraphLoading(false);
     setError(null);
-    setGraph(null);
     try {
       const [detail, nextGraph] = await Promise.all([
         getCandidateDetail(session.testId, next.id),
@@ -3479,9 +3881,7 @@ function App() {
       setManualLinks(manualLinkStore[manualLinkKey(session.testId, next.id)] ?? []);
       setLinkDraft(null);
       setPlaying(false);
-      const hasDragEdits = Object.values(dragPositionsByCandidate).some((positions) => Object.keys(positions).length > 0)
-        || Object.values(dragTrailsByCandidate).some((trails) => Object.values(trails).some((trail) => trail.length > 1));
-      setCanvasLevel(hasDragEdits ? "token" : "block");
+      setCanvasLevel((current) => current === "line" || current === "line_tokens" ? "block" : current);
       setSelectedBlockId(null);
       setLineTokenScope(null);
       setDragMode(false);
@@ -3497,6 +3897,7 @@ function App() {
       logEvent("candidate_switch", { testId: session.testId, candidateId: next.id, initialRank: next.originalRank ?? next.rank, currentRank: next.rank, retrievalScore: next.similarity });
       logEvent("candidate_open", { testId: session.testId, candidateId: next.id, initialRank: next.originalRank ?? next.rank, currentRank: next.rank, retrievalScore: next.similarity });
     } catch (err) {
+      if (requestId === loadRequestRef.current) setActiveCandidateId(previousCandidateId);
       setError(isUnavailableTokenError(err) ? null : err instanceof Error ? err.message : String(err));
       if (requestId === loadRequestRef.current) setLoadingStep(null);
     } finally {
@@ -3840,13 +4241,15 @@ function App() {
           lineMatches: localLineMatches
         }
       }));
-      invalidateCandidatePayload(session.testId, candidate.id);
-      const [detail, nextGraph] = await Promise.all([
-        getCandidateDetail(session.testId, candidate.id),
-        getVisualizationGraph(session.testId, candidate.id)
-      ]);
-      setCandidate(detail);
-      setGraph(nextGraph);
+      if (result.activeCandidate) setCandidate(result.activeCandidate);
+      if (result.activeGraph) setGraph(result.activeGraph);
+      setActiveCandidateId(candidate.id);
+      Object.entries(result.updatedCandidates ?? {}).forEach(([candidateId, detail]) => {
+        candidateDetailCacheRef.current[payloadCacheKey(session.testId, candidateId)] = detail;
+      });
+      Object.entries(result.updatedGraphs ?? {}).forEach(([candidateId, nextGraph]) => {
+        graphCacheRef.current[payloadCacheKey(session.testId, candidateId)] = nextGraph;
+      });
       logEvent("projection_drag_drop", {
         testId: session.testId,
         candidateId: candidate.id,
@@ -3871,19 +4274,40 @@ function App() {
   const currentExternalImpacts = candidate ? externalImpactsByCandidate[candidate.id] ?? [] : [];
   const supportsIntervention = session?.capabilities?.intervention !== false;
 
-  async function confirmReferenceForGeneration() {
-    if (!session || !candidate) return;
-    setGenerationLoading(true);
+  async function confirmReferenceForGeneration(selectedCandidate?: CandidateDetail) {
+    const referenceCandidate = selectedCandidate ?? candidate;
+    if (!session || !referenceCandidate) return;
+    const previousReferenceId = generationConfirmation?.selection.selectedCandidateId;
+    const referenceChanged = previousReferenceId !== referenceCandidate.id;
+    if (!referenceChanged && generationConfirmation) {
+      setGenerationMode(true);
+      setAdjudicationMode(false);
+      return;
+    }
+    const requestId = ++generationPreviewRequestRef.current;
+    flushSync(() => {
+      setGenerationMode(true);
+      setAdjudicationMode(false);
+      setGenerationLoading(true);
+      setGenerationOpeningCandidate(referenceCandidate);
+      setGenerationConfirmation(null);
+      setGenerationResult(null);
+      setGenerationComparison(null);
+      setGenerationEvaluation(null);
+      setReferenceHint(null);
+      setReferenceFinalized(false);
+      setConfirmReferenceOpen(false);
+    });
     setError(null);
     try {
-      const summary = candidates.find((item) => item.id === candidate.id);
+      const summary = candidates.find((item) => item.id === referenceCandidate.id);
       const interactionUsed = Object.keys(dragPositionsByCandidate).some((candidateId) => Object.keys(dragPositionsByCandidate[candidateId]).length > 0)
         || Object.keys(dragMatchesByCandidate).length > 0;
       const confirmation = await confirmReference({
         caseId: session.testId,
-        selectedCandidateId: candidate.id,
+        selectedCandidateId: referenceCandidate.id,
         selectedRank: summary?.rank ?? null,
-        selectedScore: summary?.similarity ?? candidate.similarity,
+        selectedScore: summary?.similarity ?? referenceCandidate.similarity,
         interactionUsed,
         model: modelId,
         appMode,
@@ -3891,22 +4315,20 @@ function App() {
         participantId: studySession?.participantId,
         caseAttemptId: caseAttemptId ?? undefined
       });
+      if (requestId !== generationPreviewRequestRef.current) return;
       setGenerationConfirmation(confirmation);
-      setReferenceFinalized(false);
-      setConfirmReferenceOpen(false);
-      setGenerationResult(null);
-      setGenerationComparison(null);
-      setGenerationEvaluation(null);
-      setReferenceHint(null);
-      setGenerationMode(true);
+      setGenerationOpeningCandidate(null);
       setDragMode(false);
       setLinkMode(false);
       setAdjudicationMode(false);
-      logEvent("reference_preview", { testId: session.testId, candidateId: candidate.id, selectedRank: summary?.rank, interactionUsed });
+      logEvent("reference_preview", { testId: session.testId, candidateId: referenceCandidate.id, selectedRank: summary?.rank, interactionUsed, source: selectedCandidate ? "adjudication" : "toolbar" });
     } catch (err) {
+      if (requestId !== generationPreviewRequestRef.current) return;
+      setGenerationMode(false);
+      setGenerationOpeningCandidate(null);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setGenerationLoading(false);
+      if (requestId === generationPreviewRequestRef.current) setGenerationLoading(false);
     }
   }
 
@@ -3947,9 +4369,14 @@ function App() {
         condition
       });
       setGenerationResult(result);
+      const evaluationRequest = evaluateGeneration(result.generationId);
       if (isDemo) {
-        const [comparison, evaluation] = await Promise.all([loadGenerationComparison(result.generationId), evaluateGeneration(result.generationId)]);
+        const [comparison, evaluation] = await Promise.all([loadGenerationComparison(result.generationId), evaluationRequest]);
         setGenerationComparison(comparison);
+        setGenerationEvaluation(evaluation);
+        logEvent("evaluation_complete", { caseId: result.caseId, generationId: result.generationId, status: evaluation.status, passRate: evaluation.passRate });
+      } else {
+        const evaluation = await evaluationRequest;
         setGenerationEvaluation(evaluation);
         logEvent("evaluation_complete", { caseId: result.caseId, generationId: result.generationId, status: evaluation.status, passRate: evaluation.passRate });
       }
@@ -3994,6 +4421,8 @@ function App() {
     setStudySession(null);
     setSession(null);
     setCandidate(null);
+    setActiveCandidateId(null);
+    setActiveCandidateId(null);
     setGraph(null);
     setCandidates([]);
     setTaskBrief(null);
@@ -4172,13 +4601,14 @@ function App() {
     });
   }
 
-  function selectExternalImpact(impact: ExternalImpact) {
+  function selectExternalImpact(impact: ExternalImpact, conceptId?: number) {
     const key = externalImpactKey(impact);
     const active = selectedExternalImpactKey === key;
+    const isConceptImpact = queryPointMode === "concept" && conceptId != null;
     setSelectedExternalImpactKey(active ? null : key);
     setSelectedDragMatchKey(null);
     setSelectedManualLinkId(null);
-    setSelectedTokenIds(active ? [] : [`q_tok_${impact.queryTokenIndex}`, `c_tok_${impact.codeTokenIndex}`]);
+    setSelectedTokenIds(active ? [] : isConceptImpact ? [`c_tok_${impact.codeTokenIndex}`] : [`q_tok_${impact.queryTokenIndex}`, `c_tok_${impact.codeTokenIndex}`]);
     setSelectedConcepts([]);
     setSelectedLines([]);
     setPlaying(false);
@@ -4187,6 +4617,7 @@ function App() {
       candidateId: candidate?.id,
       queryTokenIndex: impact.queryTokenIndex,
       codeTokenIndex: impact.codeTokenIndex,
+      conceptId: conceptId ?? null,
       delta: impact.delta
     });
   }
@@ -4231,13 +4662,13 @@ function App() {
 
   if (!isDemo && !studySession) return <ParticipantGate condition={studyCondition} onStart={startParticipant} />;
 
-  if (taskBrief && !briefConfirmed) return <div className={`app-shell app-mode-${appMode} task-brief-stage`}><header className="topbar"><h1>{appMode === "study" ? "Interactive RAG User Study" : appMode === "baseline" ? "Interactive RAG Baseline" : "Interactive RAG"}</h1>{!isDemo ? <button onClick={changeParticipant}>Change participant</button> : null}</header><TaskBriefPanel brief={taskBrief} onConfirm={confirmTaskBrief} ready={briefWorkspaceReady} /></div>;
+  if (briefLoading || (taskBrief && !briefConfirmed)) return <div className={`app-shell app-mode-${appMode} task-brief-stage`}><header className="topbar"><h1>{appMode === "study" ? "Interactive RAG User Study" : appMode === "study_dev" ? "Interactive RAG Study Development" : appMode === "baseline" ? "Interactive RAG Baseline" : "Interactive RAG"}</h1>{!isDemo ? <button onClick={changeParticipant}>Change participant</button> : null}</header>{taskBrief ? <TaskBriefPanel brief={taskBrief} onConfirm={confirmTaskBrief} ready={briefWorkspaceReady} /> : <section className="panel task-brief-panel"><div className="panel-title">Task Brief</div><p>Loading task context...</p></section>}</div>;
 
   return (
     <div className={`app-shell app-mode-${appMode}`}>
       <header className="topbar">
         <div>
-          <h1>{appMode === "study" ? "Interactive RAG User Study" : appMode === "baseline" ? "Interactive RAG Baseline" : "Interactive RAG"}</h1>
+          <h1>{appMode === "study" ? "Interactive RAG User Study" : appMode === "study_dev" ? "Interactive RAG Study Development" : appMode === "baseline" ? "Interactive RAG Baseline" : "Interactive RAG"}</h1>
         </div>
         <div className="toolbar">
           {isDemo ? <label className="model-selector">
@@ -4253,7 +4684,7 @@ function App() {
             <option value="">Select an example</option>
             {tests.map((id) => (
               <option key={id} value={id}>
-              {id === "48" ? "48 · allowed extension alignment" : id === "1556" ? "1556 · reset system state" : id === "1642" ? "1642 · compact rerank demo" : id === "2695" ? "2695 · EM iteration" : id === "2797" ? "2797 · command-line argument recovery" : id === "2836" ? "2836 · parent override logging recovery" : id === "3856" ? "3856 · comparable dictionary" : id === "954" ? "954 · API decorator specificity" : id === "csn_9848" ? "9848 · configuration return type" : id === "csn_11087" ? "11087 · right-click position" : id === "csn_11078" ? "11078 · error message display" : id === "csn_9406" ? "9406 · device buffer write" : id === "csn_400" ? "400 · parse options and commands" : id === "csn_13958" ? "13958 · line-pair diagnosis" : id === "csn_13527" ? "13527 · command-line logging" : id === "csn_8838" ? "8838 · interned keyword API bridge" : id === "csn_11772" ? "11772 · asset MIME-type extension bridge" : id === "csn_2812" ? "2812 · qubit dimension log2 bridge" : id === "csn_7727" ? "7727 · Stokes calibration feed-type bridge" : id === "csn_4772" ? "4772 · KMIP DeviceCredential serialization bridge" : id === "csn_10023" ? "10023 · OSM replication state bridge" : id === "csn_2207" ? "2207 · window sum-square hop-length bridge" : id === "csn_5340" ? "5340 · GeoTiff VLR API bridge" : id === "csn_10164" ? "10164 · V4 meter request bridge" : id === "csn_13655" ? "13655 · application logging bridge" : id === "csn_14175" ? "14175 · notebook format bridge" : id === "csn_10643" ? "10643 · root logger bridge" : id === "csn_12075" ? "12075 · current tags API bridge" : `test ${id}`}
+              {id === "48" ? "48 · allowed extension alignment" : id === "1556" ? "1556 · reset system state" : id === "1642" ? "1642 · compact rerank demo" : id === "2695" ? "2695 · EM iteration" : id === "2797" ? "2797 · command-line argument recovery" : id === "2836" ? "2836 · parent override logging recovery" : id === "3856" ? "3856 · comparable dictionary" : id === "954" ? "954 · API decorator specificity" : id === "csn_9848" ? "9848 · configuration return type" : id === "csn_11087" ? "11087 · right-click position" : id === "csn_11078" ? "11078 · error message display" : id === "csn_9406" ? "9406 · device buffer write" : id === "csn_400" ? "400 · parse options and commands" : id === "csn_13958" ? "13958 · line-pair diagnosis" : id === "csn_13527" ? "13527 · command-line logging" : id === "csn_8838" ? "8838 · interned keyword API bridge" : id === "csn_11772" ? "11772 · asset MIME-type extension bridge" : id === "csn_584" ? "584 · random perspective parameters" : id === "csn_2812" ? "2812 · qubit dimension log2 bridge" : id === "csn_7727" ? "7727 · Stokes calibration feed-type bridge" : id === "csn_4772" ? "4772 · KMIP DeviceCredential serialization bridge" : id === "csn_10023" ? "10023 · OSM replication state bridge" : id === "csn_2207" ? "2207 · window sum-square hop-length bridge" : id === "csn_5340" ? "5340 · GeoTiff VLR API bridge" : id === "csn_10164" ? "10164 · V4 meter request bridge" : id === "csn_13655" ? "13655 · application logging bridge" : id === "csn_14175" ? "14175 · notebook format bridge" : id === "csn_10643" ? "10643 · root logger bridge" : id === "csn_12075" ? "12075 · current tags API bridge" : `test ${id}`}
               </option>
             ))}
           </select>
@@ -4280,7 +4711,7 @@ function App() {
             <Move size={16} />
             Drag
           </button> : null}
-          {!isBaseline ? <button
+          <button
             className={adjudicationMode ? "active-tool" : ""}
             onClick={toggleAdjudicationMode}
             disabled={!session || retrievalLocked}
@@ -4288,14 +4719,14 @@ function App() {
           >
             <ArrowLeftRight size={16} />
             Adjudicate
-          </button> : null}
+          </button>
           <button
-            className={generationMode ? "active-tool" : ""}
-            onClick={generationMode ? () => setGenerationMode(false) : confirmReferenceForGeneration}
-            disabled={generationLoading || retrievalLocked || (!generationMode && (!session || !candidate || modelId !== "xsearch" || !session.referenceSelection?.enabled || !GENERATION_CASE_IDS.has(session.testId)))}
+            className={generationMode ? "active-tool" : "reference-action"}
+            onClick={generationMode ? () => setGenerationMode(false) : () => void confirmReferenceForGeneration()}
+            disabled={loading || generationLoading || retrievalLocked || (!generationMode && (!session || !candidate || modelId !== "xsearch" || !session.referenceSelection?.enabled || !GENERATION_CASE_IDS.has(session.testId)))}
             title={generationMode ? "Return to retrieval and compare another reference" : modelId !== "xsearch" ? "Generation validation currently uses XSearch reference evidence." : "Use the current reference for generation; final submission happens in Generation."}
           >
-            <CirclePlay size={16} />
+            {generationMode ? <CirclePlay size={16} /> : <BookOpenCheck size={16} />}
             {generationMode ? "Retrieval" : "Use as Reference"}
           </button>
         </div>
@@ -4340,8 +4771,9 @@ function App() {
           externalImpacts={currentExternalImpacts}
           selectedExternalImpactKey={selectedExternalImpactKey}
           onExternalImpact={selectExternalImpact}
+          queryPointMode={queryPointMode}
         />}
-        <div className={isBaseline ? "main-workspace baseline-main-workspace" : adjudicationMode ? "main-workspace adjudicating" : "main-workspace"}>
+        <div className={`main-workspace${isBaseline ? " baseline-main-workspace" : ""}${adjudicationMode ? " adjudicating" : ""}`}>
           {generationMode && generationConfirmation ? (
             <GenerationPanel
               confirmation={generationConfirmation}
@@ -4362,13 +4794,39 @@ function App() {
               onFinalize={() => setConfirmReferenceOpen(true)}
               showFinalization={!isDemo}
             />
+          ) : generationMode ? (
+            <GenerationOpeningPanel candidate={generationOpeningCandidate} query={session?.query.rawText ?? ""} onBack={() => setGenerationMode(false)} />
           ) : (
-          isBaseline ? (
+          isBaseline ? (adjudicationMode && session ? (
+            <div className="adjudication-workspace">
+              <CandidatePanel
+                candidates={candidates.length ? candidates : session.candidates}
+                selectedId={activeCandidateId}
+                onSelect={selectCandidate}
+                modelId={modelId}
+                showGroundTruth={false}
+                adjudicationMode
+                adjudicationIds={adjudicationIds}
+                onAdjudicationToggle={toggleAdjudicationCandidate}
+              />
+              {adjudicationIds.length === 2 ? (
+                <AdjudicationPanel
+                  session={session}
+                  candidates={adjudicationIds.map((id) => adjudicationCandidates[id]).filter((item): item is CandidateDetail => Boolean(item))}
+                  summaries={Object.fromEntries((candidates.length ? candidates : session.candidates).map((item) => [item.id, item]))}
+                  showGroundTruth={false}
+                  showEvidence={false}
+                  choosingReference={generationLoading}
+                  onChooseReference={(selectedCandidate) => void confirmReferenceForGeneration(selectedCandidate)}
+                />
+              ) : <section className="panel adjudication-placeholder">Select two candidates from the ranked list to compare them before choosing one as a reference.</section>}
+            </div>
+          ) : (
             <>
               <BaselineCodeViewer candidate={candidate} displaySimilarity={currentCandidateSummary?.similarity} />
               <CandidatePanel
                 candidates={candidates.length ? candidates : session?.candidates ?? []}
-                selectedId={candidate?.id ?? null}
+                selectedId={activeCandidateId}
                 onSelect={selectCandidate}
                 modelId={modelId}
                 showGroundTruth={false}
@@ -4376,12 +4834,12 @@ function App() {
                 onAdjudicationToggle={() => undefined}
               />
             </>
-          ) : <>
+          )) : <>
           {adjudicationMode && session ? (
             <div className="adjudication-workspace">
               <CandidatePanel
                 candidates={candidates.length ? candidates : session.candidates}
-                selectedId={candidate?.id ?? null}
+                selectedId={activeCandidateId}
                 onSelect={selectCandidate}
                 modelId={modelId}
                 showGroundTruth={isDemo}
@@ -4395,6 +4853,9 @@ function App() {
                   candidates={adjudicationIds.map((id) => adjudicationCandidates[id]).filter((item): item is CandidateDetail => Boolean(item))}
                   summaries={Object.fromEntries((candidates.length ? candidates : session.candidates).map((item) => [item.id, item]))}
                   showGroundTruth={isDemo}
+                  showEvidence
+                  choosingReference={generationLoading}
+                  onChooseReference={(selectedCandidate) => void confirmReferenceForGeneration(selectedCandidate)}
                 />
               ) : (
                 <section className="panel adjudication-placeholder">Select two candidates from the ranked list to compare their line-level evidence.</section>
@@ -4506,7 +4967,7 @@ function App() {
           </div>
           <CandidatePanel
             candidates={candidates.length ? candidates : session?.candidates ?? []}
-            selectedId={candidate?.id ?? null}
+            selectedId={activeCandidateId}
             onSelect={selectCandidate}
             modelId={modelId}
             showGroundTruth={isDemo}

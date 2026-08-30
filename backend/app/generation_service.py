@@ -38,7 +38,7 @@ from .data_service import (
 from .study_service import get_task_brief
 
 
-PROMPT_VERSION = "single-reference-function-only-v2"
+PROMPT_VERSION = "single-reference-function-only-v3-evidence-grounded"
 SYSTEM_PROMPT = "You are a careful Python programmer. Return only complete Python code, without Markdown fences or explanation."
 GENERATION_TESTS_DIR = Path(__file__).resolve().parent / "generation_tests"
 
@@ -47,10 +47,16 @@ GENERATION_TASK_OVERRIDES: dict[str, dict[str, str]] = {
         "functionSignature": "def compiler_format_extension(self):",
         "generationInstruction": "Implement only this function. The self object supplies environment.mimetypes and compiler_mimetype.",
     },
+    "csn_584": {
+        "functionSignature": "def get_params(width, height, distortion_scale):",
+        "generationInstruction": "Implement only this function. Return startpoints and endpoints for a random perspective transform.",
+    },
 }
 
 CSN_11772_RANK_ONE_CODE_IDX = 1_029_389
 CSN_11772_TARGET_REFERENCE_CODE_IDX = 1_001_612
+CSN_584_RANK_ONE_CODE_IDX = 1_024_026
+CSN_584_TARGET_REFERENCE_CODE_IDX = 1_004_381
 CSN_11772_CURATED_GENERATIONS: dict[str, str] = {
     "no_reference": '''def compiler_format_extension(self):
     compiler_mimetype = getattr(self, "compiler_mimetype", None)
@@ -127,6 +133,67 @@ CSN_11772_CURATED_REFERENCE_HINTS: dict[int, dict[str, str]] = {
     },
 }
 
+CSN_584_CURATED_GENERATIONS: dict[str, str] = {
+    "rank1_reference": '''def get_params(width, height, distortion_scale):
+    import random
+
+    startpoints = [
+        (0, 0),
+        (width - 1, 0),
+        (0, height - 1),
+        (width - 1, height - 1),
+    ]
+
+    endpoints = []
+    for x_coord, y_coord in startpoints:
+        offset_x = random.randint(
+            -int(width * distortion_scale / 2),
+            int(width * distortion_scale / 2),
+        )
+        offset_y = random.randint(
+            -int(height * distortion_scale / 2),
+            int(height * distortion_scale / 2),
+        )
+        endpoints.append((x_coord + offset_x, y_coord + offset_y))
+
+    return startpoints, endpoints
+''',
+    "target_reference": '''def get_params(width, height, distortion_scale):
+    import random
+
+    startpoints = [
+        (0, 0),
+        (width - 1, 0),
+        (width - 1, height - 1),
+        (0, height - 1),
+    ]
+
+    max_dx = int(distortion_scale * width / 2)
+    max_dy = int(distortion_scale * height / 2)
+
+    endpoints = [
+        (
+            random.randint(0, max_dx),
+            random.randint(0, max_dy),
+        ),
+        (
+            random.randint(width - max_dx - 1, width - 1),
+            random.randint(0, max_dy),
+        ),
+        (
+            random.randint(width - max_dx - 1, width - 1),
+            random.randint(height - max_dy - 1, height - 1),
+        ),
+        (
+            random.randint(0, max_dx),
+            random.randint(height - max_dy - 1, height - 1),
+        ),
+    ]
+
+    return startpoints, endpoints
+''',
+}
+
 # Hidden tests are evaluation-only.  The generator receives the same query the
 # participant used for reference selection, plus exactly one selected code.
 HIDDEN_EVALUATIONS: dict[str, dict[str, Any]] = {
@@ -148,6 +215,7 @@ assert (cache[7].name, cache[7].ns) == ("name", "ns")
 """,
     },
     "csn_11772": {"testFile": "csn_11772.py"},
+    "csn_584": {"testFile": "csn_584.py"},
 }
 
 
@@ -297,24 +365,37 @@ def _generation_prompt(task: dict[str, Any], context: dict[str, Any] | None) -> 
         prompt += f"\nRequired function signature:\n{task['functionSignature']}\n"
     if context:
         prompt += f"\nRetrieved reference code:\n{context['rawCode']}\n"
+        prompt += (
+            "\nUse the retrieved code as the primary implementation evidence. Infer its relevant API usage, "
+            "data contracts, ordering conventions, and control-flow constraints before writing the function. "
+            "Treat collection shape, element roles, and element ordering as project contracts only when the "
+            "reference establishes them; a parameter or variable name alone is not evidence for a project-specific "
+            "representation. Preserve applicable conventions and do not replace a concrete reference contract "
+            "with a generic alternative."
+        )
+    else:
+        prompt += "\nNo retrieved reference is available. Implement from the task specification alone."
     prompt += "\nReturn exactly one Python function definition. Do not define a class, application scaffolding, example usage, or surrounding project context."
     if task.get("generationInstruction"):
         prompt += f"\n{task['generationInstruction']}"
-    prompt += "\nUse the retrieved example only when it is relevant."
     return prompt
 
 
 def _curated_generation(case_id: str, condition: str, context: dict[str, Any] | None) -> tuple[str, str] | None:
-    """Return one representative, pre-evaluated result for the 11772 demo only."""
-    if case_id != "csn_11772":
-        return None
-    if condition == "no_rag":
-        return "no_reference", CSN_11772_CURATED_GENERATIONS["no_reference"]
+    """Return representative pre-evaluated generations for configured demos."""
     code_idx = int(context.get("codeIdx", -1)) if context else -1
-    if condition == "automatic_rag" or code_idx == CSN_11772_RANK_ONE_CODE_IDX:
-        return "rank1_reference", CSN_11772_CURATED_GENERATIONS["rank1_reference"]
-    if code_idx == CSN_11772_TARGET_REFERENCE_CODE_IDX:
-        return "target_reference", CSN_11772_CURATED_GENERATIONS["target_reference"]
+    if case_id == "csn_11772":
+        if condition == "no_rag":
+            return "no_reference", CSN_11772_CURATED_GENERATIONS["no_reference"]
+        if condition == "automatic_rag" or code_idx == CSN_11772_RANK_ONE_CODE_IDX:
+            return "rank1_reference", CSN_11772_CURATED_GENERATIONS["rank1_reference"]
+        if code_idx == CSN_11772_TARGET_REFERENCE_CODE_IDX:
+            return "target_reference", CSN_11772_CURATED_GENERATIONS["target_reference"]
+    if case_id == "csn_584":
+        if condition == "automatic_rag" or code_idx == CSN_584_RANK_ONE_CODE_IDX:
+            return "rank1_reference", CSN_584_CURATED_GENERATIONS["rank1_reference"]
+        if code_idx == CSN_584_TARGET_REFERENCE_CODE_IDX:
+            return "target_reference", CSN_584_CURATED_GENERATIONS["target_reference"]
     return None
 
 
@@ -553,9 +634,14 @@ def _validate_generated_function(generated_code: str) -> None:
     if len(tree.body) != 1 or not isinstance(tree.body[0], ast.FunctionDef):
         raise ValueError("Generation evaluation accepts exactly one Python function definition.")
 
-    forbidden_nodes = (ast.Import, ast.ImportFrom, ast.ClassDef, ast.AsyncFunctionDef, ast.Global, ast.Nonlocal, ast.Lambda)
+    allowed_imports = {"random"}
+    forbidden_nodes = (ast.ImportFrom, ast.ClassDef, ast.AsyncFunctionDef, ast.Global, ast.Nonlocal, ast.Lambda)
     forbidden_names = {"__import__", "compile", "eval", "exec", "globals", "input", "locals", "open", "setattr", "vars"}
     for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name not in allowed_imports for alias in node.names):
+                raise ValueError("Generated code imports a module that is not permitted by the evaluator.")
+            continue
         if isinstance(node, forbidden_nodes):
             raise ValueError("Generated code uses a construct that is not permitted by the evaluator.")
         if isinstance(node, ast.Name) and (node.id in forbidden_names or node.id.startswith("__")):

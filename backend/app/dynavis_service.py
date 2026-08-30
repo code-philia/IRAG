@@ -392,21 +392,24 @@ def _apply_curated_hierarchy_display_matches(
         # displayed as L4. Keep the compiler concept anchored to its explicit
         # `compiler` token through the block -> line -> token drill-down.
         display_matches = {15: 2}
+    elif test_id == "csn_584" and code_idx == 1024026:
+        display_matches = {15: [0, 1], 16: [2]}
     else:
         return
     for block in blocks:
         concept_ids = [
             concept_id
-            for line_number, concept_id in display_matches.items()
+            for line_number, matched_concepts in display_matches.items()
             if line_number in block.get("lineNumbers", [])
+            for concept_id in (matched_concepts if isinstance(matched_concepts, list) else [matched_concepts])
         ]
         if concept_ids:
             block["displayConceptIds"] = concept_ids
     for lines in lines_by_block.values():
         for line in lines:
-            concept_id = display_matches.get(int(line["lineNumber"]))
-            if concept_id is not None:
-                line["displayConceptIds"] = [concept_id]
+            matched_concepts = display_matches.get(int(line["lineNumber"]))
+            if matched_concepts is not None:
+                line["displayConceptIds"] = matched_concepts if isinstance(matched_concepts, list) else [matched_concepts]
             if test_id != "csn_11078" or int(line["lineNumber"]) != 7:
                 continue
             line["signals"] = [
@@ -491,8 +494,10 @@ def _hierarchy_payload(candidate: dict[str, Any], graph_nodes: list[dict[str, An
             if q_indices: scores.append({"conceptId": int(concept["conceptId"]), "similarity": round(float(np.dot(_normalize(np.mean([query_vectors[item] for item in q_indices], axis=0)), vector)), 6)})
         scores.sort(key=lambda item: item["similarity"], reverse=True)
         block_line_numbers = [int(line["lineNumber"]) for line in block_lines]
-        display_start = display_line_number.get(block_line_numbers[0], block_line_numbers[0])
-        display_end = display_line_number.get(block_line_numbers[-1], block_line_numbers[-1])
+        visible_block_line_numbers = [line_number for line_number in block_line_numbers if line_number in display_line_number]
+        range_line_numbers = visible_block_line_numbers or block_line_numbers
+        display_start = display_line_number.get(range_line_numbers[0], range_line_numbers[0])
+        display_end = display_line_number.get(range_line_numbers[-1], range_line_numbers[-1])
         range_label = f"L{display_start}" if display_start == display_end else f"L{display_start}-{display_end}"
         block_items.append({**block, "tokenIndices": token_indices, "lineNumbers": block_line_numbers, "representationAvailable": representation_available, "similarity": scores[0]["similarity"] if scores else 0.0, "conceptId": scores[0]["conceptId"] if scores else None, "conceptScores": scores, "signals": _hierarchy_signals(concept_vectors, token_indices, code_by_token, normalized, code_tokens, scores, suppress_latent_tokens=True), "label": f"{block['kind']} · {range_label}"})
         block_vectors.append(vector)

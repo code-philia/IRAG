@@ -8,6 +8,7 @@ export function setEventContext(context: Partial<StudySession> & { caseAttemptId
 
 function currentAppMode() {
   if (window.location.pathname.startsWith("/baseline")) return "baseline";
+  if (window.location.pathname.startsWith("/study_dev")) return "study_dev";
   if (window.location.pathname.startsWith("/study")) return "study";
   return "demo";
 }
@@ -41,7 +42,15 @@ export async function loadSession(testId: string, model = "xsearch"): Promise<Se
   });
 }
 
-export async function loadSessionBootstrap(testId: string, model = "xsearch"): Promise<{ session: SessionPayload; candidate: CandidateDetail; graph: VisualizationGraph }> {
+export async function loadSessionBootstrap(testId: string, model = "xsearch"): Promise<{
+  session: SessionPayload;
+  candidate: CandidateDetail;
+  graph: VisualizationGraph;
+  prefetched?: {
+    candidates: Record<string, CandidateDetail>;
+    graphs: Record<string, VisualizationGraph>;
+  };
+}> {
   return fetchJson("/api/session/bootstrap", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -121,6 +130,10 @@ export async function applyDragRerank(payload: {
   status: "ok";
   candidates: CandidateSummary[];
   generalizedMatchesByCandidate?: Record<string, unknown>;
+  activeCandidate?: CandidateDetail;
+  activeGraph?: VisualizationGraph;
+  updatedCandidates?: Record<string, CandidateDetail>;
+  updatedGraphs?: Record<string, VisualizationGraph>;
   localMatches?: {
     tokenMatches: Array<Record<string, unknown>>;
     lineMatches: Array<Record<string, unknown>>;
@@ -183,7 +196,7 @@ export async function confirmReference(payload: {
   selectedScore: number | null;
   interactionUsed: boolean;
   model: string;
-  appMode?: "demo" | "study" | "baseline";
+  appMode?: "demo" | "study" | "study_dev" | "baseline";
   sessionId?: string;
   participantId?: string;
   caseAttemptId?: string;

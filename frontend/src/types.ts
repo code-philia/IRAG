@@ -428,6 +428,7 @@ export type TaskBrief = {
   referenceSelectionInstruction: string;
   sections?: Array<{
     heading: string;
+    content?: Array<{ type: "paragraph"; text: string } | { type: "code"; language?: string; content: string }>;
     paragraphs?: string[];
     codeBlocks?: Array<{ language?: string; content: string }>;
     bullets?: string[];
