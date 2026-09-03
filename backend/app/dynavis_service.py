@@ -4,6 +4,7 @@ import hashlib
 import ast
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,38 @@ def _run_id(test_id: str, candidate_id: str) -> str:
 def _normalize(vec: np.ndarray) -> np.ndarray:
     norm = np.linalg.norm(vec)
     return vec / norm if norm > 0 else vec
+
+
+def _apply_case_graph_display_layout(test_id: str, candidate_id: str, nodes: list[dict[str, Any]]) -> None:
+    """Make the intended study interactions readable without changing embeddings."""
+    by_id = {str(node.get("id")): node for node in nodes}
+    if test_id == "csn_3846" and candidate_id == "code_1023534":
+        # Move both words in ``via decorator`` right and up so their concept
+        # centroid sits closer to the source's decorator_node evidence.
+        for token_index in (10, 11):
+            node = by_id.get(f"q_tok_{token_index}")
+            if node:
+                node["y"] = max(38.0, float(node["y"]) - 105.0)
+                node["x"] = min(820.0, float(node["x"]) + 90.0)
+    elif test_id == "csn_8884" and candidate_id == "code_1012324":
+        # Give the three tokens in ``except try bodies`` more separation from
+        # the neighboring query concepts while keeping their relative layout.
+        for token_index in (5, 6, 7):
+            node = by_id.get(f"q_tok_{token_index}")
+            if node:
+                node["x"] = max(40.0, float(node["x"]) - 110.0)
+                node["y"] = min(500.0, float(node["y"]) + 160.0)
+    elif test_id == "csn_42" and candidate_id == "code_1016745":
+        # Leave a visible gap below the database concept for connection cues.
+        for token_index in (9, 13, 22):
+            node = by_id.get(f"c_tok_{token_index}")
+            if node:
+                node["y"] = min(500.0, float(node["y"]) + 105.0)
+    elif test_id == "csn_9388" and candidate_id == "code_1012695":
+        node = by_id.get("q_tok_2")
+        if node:
+            node["x"] = max(40.0, float(node["x"]) - 20.0)
+            node["y"] = min(500.0, float(node["y"]) + 40.0)
 
 
 def _semantic_ast_blocks(raw_code: str, code_lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -789,12 +822,29 @@ def _build_real_dynavis_inputs(content_path: Path, test_id: str, candidate_id: s
         else "code_centroid_anchor_fallback",
         "urlIndex": timeline.url_index,
         "codeTokenSlotOffset": timeline.token_slot_offset,
-        "truncation": "code tokens are limited to packed sequence slots 1..63",
+        "truncation": (
+            "source tokens without a full-model mapping are omitted"
+            if timeline.source.endswith("full_token_subset_cache")
+            else "code tokens are limited to packed sequence slots 1..63"
+        ),
     }
     if test_id == "csn_11087" and candidate_id == "code_1000601":
         metadata["displayAlignmentVersion"] = "csn_11087_original_line_alignment_v2"
     if test_id == "csn_11078" and candidate_id == "code_1022739":
         metadata["displayAlignmentVersion"] = "csn_11078_error_value_alignment_v1"
+    if test_id == "csn_14238" and candidate_id == "code_1039478":
+        metadata["displayAlignmentVersion"] = "csn_14238_rank1_full_tokens_v2"
+    if test_id == "csn_8884" and candidate_id == "code_1037136":
+        metadata["displayAlignmentVersion"] = "csn_8884_target_full_tokens_v1"
+    if test_id == "csn_8884" and candidate_id == "code_1012324":
+        metadata["displayAlignmentVersion"] = "csn_8884_source_query_down_v2"
+        metadata["displayQueryMatchVersion"] = "csn_8884_source_branches_line2_v4"
+    if test_id == "csn_3846":
+        metadata["displayQueryMatchVersion"] = "csn_3846_visible_query_matches_v2"
+    if test_id == "csn_42":
+        metadata["displayQueryMatchVersion"] = "csn_42_two_visible_concepts_v1"
+    if test_id == "csn_9388":
+        metadata["displayQueryMatchVersion"] = "csn_9388_url_concept_line7_v3"
     with open(dataset_dir / "info.json", "w", encoding="utf-8") as f:
         json.dump(
             {
@@ -821,6 +871,8 @@ def _build_real_dynavis_inputs(content_path: Path, test_id: str, candidate_id: s
 
 
 def _ensure_projection(test_id: str, candidate_id: str, candidate: dict[str, Any] | None = None) -> tuple[Path, list[dict[str, Any]], dict[str, Any]]:
+    candidate = candidate or apply_adapter_to_candidate_payload(build_candidate_payload(test_id, candidate_id))
+    display_query_tokens = _query_tokens_for_candidate(test_id, candidate)
     rid = _run_id(test_id, candidate_id)
     content_path = RUNS_DIR / rid
     nodes_path = content_path / "dataset" / "nodes.json"
@@ -829,20 +881,45 @@ def _ensure_projection(test_id: str, candidate_id: str, candidate: dict[str, Any
     refresh_display_alignment = (
         (test_id == "csn_11087" and candidate_id == "code_1000601", "csn_11087_original_line_alignment_v2"),
         (test_id == "csn_11078" and candidate_id == "code_1022739", "csn_11078_error_value_alignment_v1"),
+        (test_id == "csn_14238" and candidate_id == "code_1039478", "csn_14238_rank1_full_tokens_v2"),
+        (test_id == "csn_8884" and candidate_id == "code_1037136", "csn_8884_target_full_tokens_v1"),
+        (test_id == "csn_8884" and candidate_id == "code_1012324", "csn_8884_source_query_down_v2"),
     )
     expected_alignment_version = next((version for applies, version in refresh_display_alignment if applies), None)
+    expected_display_match_version = {
+        "csn_3846": "csn_3846_visible_query_matches_v2",
+        "csn_42": "csn_42_two_visible_concepts_v1",
+        "csn_9388": "csn_9388_url_concept_line7_v3",
+    }.get(test_id)
+    if test_id == "csn_8884" and candidate_id == "code_1012324":
+        expected_display_match_version = "csn_8884_source_branches_line2_v4"
     if nodes_path.exists():
         with open(nodes_path, "r", encoding="utf-8") as f:
             nodes = json.load(f)
         with open(info_path, "r", encoding="utf-8") as f:
             metadata = json.load(f)
         cached_alignment_version = metadata.get("displayAlignmentVersion")
+        cached_display_match_version = metadata.get("displayQueryMatchVersion")
+        cached_query_tokens = [
+            str(node.get("label") or "")
+            for node in nodes
+            if node.get("type") == "query_token"
+        ]
     else:
         cached_alignment_version = None
-    if not nodes_path.exists() or (expected_alignment_version and cached_alignment_version != expected_alignment_version):
+        cached_display_match_version = None
+        cached_query_tokens = []
+    needs_rebuild = not nodes_path.exists() or (
+        expected_alignment_version and cached_alignment_version != expected_alignment_version
+    ) or (
+        expected_display_match_version and cached_display_match_version != expected_display_match_version
+    ) or cached_query_tokens != display_query_tokens
+    if needs_rebuild:
+        for path in (content_path / "epochs", content_path / "visualize" / "DynaVis_xsearch"):
+            if path.exists():
+                shutil.rmtree(path)
         real_inputs = _build_real_dynavis_inputs(content_path, test_id, candidate_id, candidate)
         if real_inputs is None:
-            candidate = candidate or apply_adapter_to_candidate_payload(build_candidate_payload(test_id, candidate_id))
             reason = f"candidate URL not found in packed cache: {candidate.get('metadata', {}).get('url', '')}"
             nodes, metadata = _build_synthetic_dynavis_inputs(content_path, test_id, candidate_id, reason, candidate)
         else:
@@ -852,6 +929,12 @@ def _ensure_projection(test_id: str, candidate_id: str, candidate: dict[str, Any
     last_epoch = max(available)
     projection_path = content_path / "visualize" / "DynaVis_xsearch" / "epochs" / f"epoch_{last_epoch}" / "projection.npy"
     if not projection_path.exists():
+        expected_epoch_dirs = {f"epoch_{epoch}" for epoch in available}
+        epochs_path = content_path / "epochs"
+        if epochs_path.exists():
+            for path in epochs_path.iterdir():
+                if path.is_dir() and path.name not in expected_epoch_dirs:
+                    shutil.rmtree(path)
         os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
         if str(TTV_TOOL_PATH) not in sys.path:
             sys.path.insert(0, str(TTV_TOOL_PATH))
@@ -954,6 +1037,7 @@ def build_dynavis_graph(test_id: str, candidate_id: str, epoch: int = 4, candida
     graph_nodes = []
     for node, xy in zip(nodes, scaled):
         graph_nodes.append({**node, **metadata_by_id.get(node["id"], {}), "x": float(xy[0]), "y": float(xy[1])})
+    _apply_case_graph_display_layout(str(test_id), str(candidate_id), graph_nodes)
 
     semantic_links = []
     embedding_matrix: np.ndarray | None = None

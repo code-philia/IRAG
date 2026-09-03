@@ -438,6 +438,95 @@ CSN_RERANK_DEMO_TOP_ITEMS: dict[str, list[dict[str, Any]]] = {
         {"codeIdx": 13351, "score": 0.425, "rank": 4},
         {"codeIdx": 17340, "score": 0.42, "rank": 5},
     ],
+    "csn_3846": [
+        {"codeIdx": 23534, "score": 0.642000, "rank": 1, "curatedSource": True, "sourceOriginalRank": 40},
+        {"codeIdx": 2786, "score": 0.606322, "rank": 2},
+        {"codeIdx": 10842, "score": 0.597977, "rank": 3},
+        {"codeIdx": 16758, "score": 0.590468, "rank": 4},
+        {"codeIdx": 11754, "score": 0.576100, "rank": 5},
+        {"codeIdx": 20000, "score": 0.555627, "rank": 6},
+        {"codeIdx": 26183, "score": 0.553561, "rank": 7},
+        {"codeIdx": 30899, "score": 0.549231, "rank": 8},
+        {"codeIdx": 34730, "score": 0.536361, "rank": 9},
+        {"codeIdx": 13622, "score": 0.528848, "rank": 10},
+        {"codeIdx": 42625, "score": 0.522766, "rank": 11},
+        {"codeIdx": 35583, "score": 0.520584, "rank": 12},
+        {"codeIdx": 40139, "score": 0.509303, "rank": 13},
+        {"codeIdx": 38572, "score": 0.506171, "rank": 14},
+        {"codeIdx": 39906, "score": 0.504750, "rank": 15},
+        {"codeIdx": 33231, "score": 0.503000, "rank": 16},
+        {"codeIdx": 26225, "score": 0.500123, "rank": 17},
+        {"codeIdx": 25158, "score": 0.500074, "rank": 18},
+        {"codeIdx": 34778, "score": 0.488438, "rank": 19},
+        {"codeIdx": 43790, "score": 0.488347, "rank": 20},
+        {"codeIdx": 24098, "score": 0.487779, "rank": 21},
+    ],
+    "csn_12226": [
+        {"codeIdx": 1480, "score": 0.823232, "rank": 1},
+        {"codeIdx": 32390, "score": 0.802975, "rank": 2},
+        {"codeIdx": 12871, "score": 0.801117, "rank": 3},
+        {"codeIdx": 25236, "score": 0.765298, "rank": 4},
+        {"codeIdx": 28342, "score": 0.764415, "rank": 5},
+        {"codeIdx": 43794, "score": 0.760594, "rank": 6},
+        {"codeIdx": 39526, "score": 0.743002, "rank": 7},
+        {"codeIdx": 25045, "score": 0.741704, "rank": 8},
+        {"codeIdx": 19186, "score": 0.733619, "rank": 9},
+        {"codeIdx": 43065, "score": 0.727311, "rank": 10},
+        {"codeIdx": 15865, "score": 0.718085, "rank": 11},
+        {"codeIdx": 12750, "score": 0.689413, "rank": 12},
+        {"codeIdx": 25489, "score": 0.682102, "rank": 13},
+        {"codeIdx": 28247, "score": 0.678831, "rank": 14},
+        {"codeIdx": 13735, "score": 0.672453, "rank": 15},
+        {"codeIdx": 22559, "score": 0.671550, "rank": 16},
+        {"codeIdx": 5959, "score": 0.669356, "rank": 17},
+        {"codeIdx": 197, "score": 0.667451, "rank": 18},
+        {"codeIdx": 20115, "score": 0.660175, "rank": 19},
+        {"codeIdx": 13465, "score": 0.659320, "rank": 20},
+    ],
+    "csn_42": [
+        {"codeIdx": 16745, "score": 0.883587, "rank": 1, "curatedSource": True, "sourceOriginalRank": 6},
+        {"codeIdx": 12819, "score": 0.875000, "rank": 2},
+        {"codeIdx": 2485, "score": 0.864840, "rank": 3},
+        {"codeIdx": 23446, "score": 0.817407, "rank": 4},
+        {"codeIdx": 26579, "score": 0.767614, "rank": 5},
+        {"codeIdx": 26572, "score": 0.723483, "rank": 6},
+        {"codeIdx": 1755, "score": 0.716563, "rank": 7},
+        {"codeIdx": 11288, "score": 0.716157, "rank": 8},
+        {"codeIdx": 13890, "score": 0.714993, "rank": 9},
+        {"codeIdx": 25778, "score": 0.710863, "rank": 10},
+        {"codeIdx": 27146, "score": 0.693314, "rank": 11},
+        {"codeIdx": 37762, "score": 0.687432, "rank": 12},
+        {"codeIdx": 41412, "score": 0.687134, "rank": 13},
+        {"codeIdx": 4155, "score": 0.685972, "rank": 14},
+        {"codeIdx": 6706, "score": 0.682094, "rank": 15},
+        {"codeIdx": 4389, "score": 0.680885, "rank": 16},
+        {"codeIdx": 10213, "score": 0.680857, "rank": 17},
+        {"codeIdx": 10995, "score": 0.679004, "rank": 18},
+        {"codeIdx": 24867, "score": 0.675905, "rank": 19},
+        {"codeIdx": 13886, "score": 0.671000, "rank": 20},
+    ],
+    "csn_9388": [
+        {"codeIdx": 12695, "score": 0.704000, "rank": 1, "curatedSource": True, "sourceOriginalRank": 4},
+        {"codeIdx": 3669, "score": 0.679318, "rank": 2},
+        {"codeIdx": 4447, "score": 0.674671, "rank": 3},
+        {"codeIdx": 9156, "score": 0.668000, "rank": 4},
+        {"codeIdx": 18012, "score": 0.656203, "rank": 5},
+        {"codeIdx": 19841, "score": 0.653819, "rank": 6},
+        {"codeIdx": 24170, "score": 0.647735, "rank": 7},
+        {"codeIdx": 28168, "score": 0.634194, "rank": 8},
+        {"codeIdx": 28789, "score": 0.620000, "rank": 9},
+        {"codeIdx": 28820, "score": 0.615000, "rank": 10},
+        {"codeIdx": 32259, "score": 0.610000, "rank": 11},
+        {"codeIdx": 32272, "score": 0.605000, "rank": 12},
+        {"codeIdx": 33461, "score": 0.600000, "rank": 13},
+        {"codeIdx": 38344, "score": 0.595000, "rank": 14},
+        {"codeIdx": 7230, "score": 0.590000, "rank": 15},
+        {"codeIdx": 42338, "score": 0.590000, "rank": 16},
+        {"codeIdx": 18744, "score": 0.585000, "rank": 17},
+        {"codeIdx": 42916, "score": 0.580000, "rank": 18},
+        {"codeIdx": 25484, "score": 0.575000, "rank": 19},
+        {"codeIdx": 16826, "score": 0.570000, "rank": 20},
+    ],
 }
 
 CSN_RERANK_DEMO_CONFIG: dict[str, dict[str, Any]] = {
@@ -564,6 +653,89 @@ CSN_RERANK_DEMO_CONFIG: dict[str, dict[str, Any]] = {
         "queryTokenIndices": [0, 1, 2],
         "codeTokenIndex": 36,
         "instruction": "检查 Rank1 format_extension 的 environment.mimetypes.get(extension)：它只正向检查 extension 是否有 MIME 注册。把 mimetypes 拉向 implicit format extension；后位 reference mimetype 展示同一 registry 的读取模式，而隐藏实现通过遍历该 registry 将 compiler_mimetype 反查为 extension。",
+    },
+    "csn_14238": {
+        "label": "Call-Tip Reply Freshness Reference Bridge",
+        "presetSource": "single_reference_api_bridge_screen",
+        "originalStep7000Rank": 5,
+        "queryIndex": 14238,
+        "groundTruthCodeIdx": 26942,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 39478}",
+        "queryTokenIndices": [1, 3, 4],
+        "codeTokenIndex": 100,
+        "instruction": "Rank1 在发送 call-tip 请求时保存请求 ID 和光标位置。后位 reference 展示另一个 reply handler 如何使用同一请求上下文，避免将迟到的异步回复应用到当前位置。",
+    },
+    "csn_8884": {
+        "label": "Try AST Dead-Code Reference Bridge",
+        "presetSource": "single_reference_api_bridge_screen",
+        "originalStep7000Rank": 2,
+        "queryIndex": 8884,
+        "groundTruthCodeIdx": 36831,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 12324}",
+        "queryTokenIndices": [1, 2, 4, 5, 6],
+        "codeTokenIndex": 19,
+        "instruction": "Rank1 只展示 Try AST 的 orelse 分支。后位 reference 展示 optimizer 重建控制流节点时如何保留并过滤多个分支，供 Try visitor 的实现参考。",
+    },
+    "csn_3846": {
+        "label": "Decorator Redefinition Reference Bridge",
+        "presetSource": "curated_source_display_rank1",
+        "originalStep7000Rank": 11,
+        "queryIndex": 3846,
+        "groundTruthCodeIdx": 13622,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 23534}",
+        "queryTokenIndices": [10, 11],
+        "codeTokenIndex": 23,
+        "curatedCandidateList": True,
+        "rerankScopeRank": 21,
+        "rerankScopeCodeIndices": [23534],
+        "excludeRerankCodeIndices": [43410],
+        "curatedSourceCodeIdx": 23534,
+        "curatedSourceOriginalRank": 40,
+        "targetOriginalRank": 15,
+        "instruction": "Curated Source / Display Rank1 展示函数 decorator 容器的访问与逐项遍历。将 query 中的 via decorator 拉向 decorators；后位 reference 会进一步解释 dotted decorator 的 AST 表示，以及如何识别被引用的已有对象。",
+    },
+    "csn_12226": {
+        "label": "Alarm API Result Handling Reference Bridge",
+        "presetSource": "single_reference_api_bridge_screen",
+        "queryIndex": 12226,
+        "groundTruthCodeIdx": 28342,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 1480}",
+        "queryTokenIndices": [2, 3, 5, 6],
+        "codeTokenIndex": 32,
+        "rerankScopeRank": 20,
+        "targetOriginalRank": 4,
+        "instruction": "Rank1 展示 API result 的状态与 body 如何读取，但它只处理成功响应并使用另一套输出流程。将 query 中的 results of the API call 拉向 Source 的 response body；后位 reference 会进一步展示 CLI 如何将 JSON response 处理后输出到终端。",
+    },
+    "csn_42": {
+        "label": "Cloud SQL Delete Completion Reference Bridge",
+        "presetSource": "curated_source_display_rank1",
+        "queryIndex": 42,
+        "groundTruthCodeIdx": 12086,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 16745}",
+        "queryTokenIndices": [0, 2, 5, 6],
+        "codeTokenIndex": 9,
+        "curatedCandidateList": True,
+        "rerankScopeRank": 20,
+        "rerankScopeCodeIndices": [16745],
+        "curatedSourceCodeIdx": 16745,
+        "curatedSourceOriginalRank": 6,
+        "targetOriginalRank": 16,
+        "instruction": "Curated Source / Display Rank1 展示同步数据库删除如何取得连接并执行 SQL。将 database Cloud SQL 拉向 _db_conn 或 conn；后位 reference 会进一步展示云端数据库删除的连接、请求执行和完成等待协议。也可以把 delete 拉向 execute，但这个线索提供的提升较弱。",
+    },
+    "csn_9388": {
+        "label": "URL Query Removal Reference Bridge",
+        "presetSource": "curated_same_repository_url_helpers",
+        "originalStep7000Rank": 1,
+        "queryIndex": 9388,
+        "groundTruthCodeIdx": 336,
+        "interactionCandidateId": f"code_{CSN_CODE_OFFSET + 12695}",
+        "queryTokenIndices": [2],
+        "codeTokenIndex": 75,
+        "curatedCandidateList": True,
+        "curatedSourceCodeIdx": 12695,
+        "curatedSourceOriginalRank": 4,
+        "targetOriginalRank": 15,
+        "instruction": "Curated Source / Display Rank1 展示如何把 URL 参数拼接到请求字符串。将 query 中的 URL 拉向 Source 的 url_params；后位同仓库 reference 进一步展示如何解析 URL 并重新组合各个部分，在不保留原 query 的情况下生成新的 URL。",
     },
     "csn_584": {
         "label": "Random Perspective Parameter Reference Bridge",
@@ -784,7 +956,37 @@ CSN_DISPLAY_CONCEPT_OVERRIDES: dict[str, list[dict[str, Any]]] = {
         {"conceptId": 1, "tokenIndices": [4, 9], "text": "perspective perspective"},
         {"conceptId": 2, "tokenIndices": [8, 10], "text": "random transform"},
     ],
+    "csn_8884": [
+        {"conceptId": 0, "tokenIndices": [0, 2, 3], "text": "Elim dead code"},
+        {"conceptId": 1, "tokenIndices": [5, 6, 7], "text": "except try bodies"},
+    ],
+    "csn_3846": [
+        {"conceptId": 6, "tokenIndices": [0, 1], "text": "Return True"},
+        {"conceptId": 5, "tokenIndices": [10, 11], "text": "via decorator"},
+    ],
+    "csn_42": [
+        {"conceptId": 1, "tokenIndices": [0], "text": "delete"},
+        {"conceptId": 0, "tokenIndices": [2, 5, 6], "text": "database Cloud SQL"},
+    ],
+    "csn_9388": [
+        {"conceptId": 0, "tokenIndices": [5, 6], "text": "query component"},
+        {"conceptId": 1, "tokenIndices": [2], "text": "URL"},
+    ],
 }
+
+CSN_DISPLAY_QUERY_OVERRIDES: dict[str, dict[str, Any]] = {
+    "csn_3846": {
+        "rawText": "Return True if the object is a method redefined via decorator.",
+        "tokenCount": 13,
+    },
+}
+
+
+def _display_query(test_id: str, raw_text: str, tokens: list[str]) -> tuple[str, list[str]]:
+    override = CSN_DISPLAY_QUERY_OVERRIDES.get(str(test_id))
+    if not override:
+        return raw_text, tokens
+    return str(override["rawText"]), list(tokens[:int(override["tokenCount"])])
 
 
 def _display_concepts(test_id: str, query_concepts: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -830,6 +1032,34 @@ SINGLE_REFERENCE_CASE_CONFIG: dict[str, dict[str, int]] = {
         "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 9854,
         "targetReferenceCodeIdx": CSN_CODE_OFFSET + 1612,
     },
+    "csn_14238": {
+        "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 26942,
+        "targetReferenceCodeIdx": CSN_CODE_OFFSET + 7044,
+    },
+    "csn_8884": {
+        "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 36831,
+        "targetReferenceCodeIdx": CSN_CODE_OFFSET + 37136,
+    },
+    "csn_3846": {
+        "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 13622,
+        "targetReferenceCodeIdx": CSN_CODE_OFFSET + 33231,
+        "visibleCandidateLimit": 20,
+    },
+    "csn_12226": {
+        "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 28342,
+        "targetReferenceCodeIdx": CSN_CODE_OFFSET + 25236,
+        "visibleCandidateLimit": 20,
+    },
+    "csn_42": {
+        "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 12086,
+        "targetReferenceCodeIdx": CSN_CODE_OFFSET + 6706,
+        "visibleCandidateLimit": 20,
+    },
+    "csn_9388": {
+        "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 336,
+        "targetReferenceCodeIdx": CSN_CODE_OFFSET + 7230,
+        "visibleCandidateLimit": 20,
+    },
     "csn_584": {
         "hiddenGroundTruthCodeIdx": CSN_CODE_OFFSET + 22264,
         "targetReferenceCodeIdx": CSN_CODE_OFFSET + 4381,
@@ -853,17 +1083,28 @@ def apply_single_reference_mode(session: dict[str, Any]) -> dict[str, Any]:
         return session
     hidden_id = f"code_{int(config['hiddenGroundTruthCodeIdx'])}"
     source_candidates = list(session.get("candidates", []))
-    baseline_candidates = sorted(
-        source_candidates,
-        key=lambda candidate: int(candidate.get("originalRank", candidate.get("rank", 0))),
-    )
-    visible_baseline_rank = {
-        str(candidate.get("id")): rank
-        for rank, candidate in enumerate(
-            (candidate for candidate in baseline_candidates if str(candidate.get("id")) != hidden_id),
-            start=1,
-        )
+    presentation_baseline = {
+        str(candidate_id): int(rank)
+        for candidate_id, rank in dict(session.get("_presentationBaselineRanks") or {}).items()
     }
+    if presentation_baseline:
+        visible_baseline_rank = {
+            candidate_id: rank
+            for candidate_id, rank in presentation_baseline.items()
+            if candidate_id != hidden_id
+        }
+    else:
+        baseline_candidates = sorted(
+            source_candidates,
+            key=lambda candidate: int(candidate.get("originalRank", candidate.get("rank", 0))),
+        )
+        visible_baseline_rank = {
+            str(candidate.get("id")): rank
+            for rank, candidate in enumerate(
+                (candidate for candidate in baseline_candidates if str(candidate.get("id")) != hidden_id),
+                start=1,
+            )
+        }
     candidates = [
         {key: value for key, value in candidate.items() if key != "isGroundTruth"}
         for candidate in source_candidates
@@ -881,14 +1122,20 @@ def apply_single_reference_mode(session: dict[str, Any]) -> dict[str, Any]:
         candidate["rank"] = visible_rank
         candidate.pop("corpusRank", None)
         if "originalRank" in candidate:
-            original_rank = visible_baseline_rank.get(str(candidate.get("id")), visible_rank)
+            # Prefer the rank from the participant's initially visible list.
+            # A full-corpus rerank can also introduce a new candidate; in that
+            # case keep its rerank baseline instead of silently resetting its
+            # displayed movement to zero.
+            original_rank = visible_baseline_rank.get(str(candidate.get("id")))
+            if original_rank is None:
+                original_rank = int(candidate["originalRank"])
             candidate["originalRank"] = original_rank
             candidate["rankDelta"] = original_rank - visible_rank
 
     payload = {
         key: value
         for key, value in session.items()
-        if key not in {"groundTruth", "generalizationDemo", "generalizationActive"}
+        if key not in {"groundTruth", "generalizationDemo", "generalizationActive", "_presentationBaselineRanks"}
     }
     payload["candidates"] = candidates
     hidden_details = dict(payload.get("generalizedMatchesByCandidate") or {})
@@ -1364,7 +1611,9 @@ def _build_csn_demo_session(test_id: str, top_k: int = 5) -> dict[str, Any]:
     config = CSN_RERANK_DEMO_CONFIG[str(test_id)]
     query_idx = int(config["queryIndex"])
     query_row = load_csn_queries()[query_idx]
-    query_tokens, aligned_concepts = _extract_query_concepts(_query_text(query_row))
+    query_raw_text = _query_text(query_row)
+    query_tokens, aligned_concepts = _extract_query_concepts(query_raw_text)
+    display_query_text, display_query_tokens = _display_query(test_id, query_raw_text, query_tokens)
     query_concepts = [
         {
             "id": f"concept_{concept_id}",
@@ -1378,10 +1627,13 @@ def _build_csn_demo_session(test_id: str, top_k: int = 5) -> dict[str, Any]:
     ]
     query_concepts = _display_concepts(test_id, query_concepts)
 
-    full_prefix = load_csn_gt_prefix_rankings().get(str(test_id), [])
+    full_prefix = [] if bool(config.get("curatedCandidateList")) else load_csn_gt_prefix_rankings().get(str(test_id), [])
     # Present only the true top 20. GT appears naturally after it enters this
     # range through an edit; we never insert it merely for visibility.
-    ranked_items = full_prefix[:top_k] if full_prefix else _ranking_top_items(test_id, top_k)
+    # Some early development prefix caches contain only the source and hidden
+    # GT. Fall back to the complete per-case ranking so the initial workspace
+    # still contains the requested candidate set.
+    ranked_items = full_prefix[:top_k] if len(full_prefix) >= top_k else _ranking_top_items(test_id, top_k)
     gt_idx = CSN_CODE_OFFSET + int(config["groundTruthCodeIdx"])
     candidates = []
     for item in ranked_items:
@@ -1396,6 +1648,8 @@ def _build_csn_demo_session(test_id: str, top_k: int = 5) -> dict[str, Any]:
                 "similarity": round(float(item.get("score", 0.0)), 6),
                 "isGroundTruth": code_idx == gt_idx,
                 "demoPreset": True,
+                "curatedSource": bool(item.get("curatedSource", False)),
+                "sourceOriginalRank": item.get("sourceOriginalRank"),
                 "metadata": {
                     "repo": row.get("repo", ""),
                     "path": row.get("path", ""),
@@ -1409,8 +1663,8 @@ def _build_csn_demo_session(test_id: str, top_k: int = 5) -> dict[str, Any]:
     return {
         "testId": str(test_id),
         "query": {
-            "rawText": _query_text(query_row),
-            "tokens": query_tokens,
+            "rawText": display_query_text,
+            "tokens": display_query_tokens,
             "concepts": query_concepts,
             "metadata": {
                 "repo": query_row.get("repo", ""),
@@ -1446,14 +1700,18 @@ def _build_csn_demo_session(test_id: str, top_k: int = 5) -> dict[str, Any]:
 
 
 def _build_csn_demo_candidate(test_id: str, candidate_id: str, ranking_score: float | None) -> dict[str, Any]:
-    from .aligned_xsearch_service import _code_vectors_for_url, _extract_query_concepts, _line_centroids, _query_text, _score_code
+    import torch.nn.functional as F
+
+    from .aligned_xsearch_service import QueryConcept, _code_vectors_for_url, _extract_query_concepts, _extract_query_encoding, _line_centroids, _query_text, _score_code
 
     code_idx = int(candidate_id.replace("code_", ""))
     actual_idx = csn_actual_code_idx(code_idx)
     row = load_csn_codebase()[actual_idx]
     config = CSN_RERANK_DEMO_CONFIG[str(test_id)]
     query_row = load_csn_queries()[int(config["queryIndex"])]
-    query_tokens, query_concepts = _extract_query_concepts(_query_text(query_row))
+    query_raw_text = _query_text(query_row)
+    query_tokens, query_concepts = _extract_query_concepts(query_raw_text)
+    _, display_query_tokens = _display_query(test_id, query_raw_text, query_tokens)
     code_pack = _code_vectors_for_url(row.get("url", ""))
     if code_pack is None:
         raise ValueError(f"candidate URL not found in Step-7000 packed cache: {row.get('url', '')}")
@@ -1462,27 +1720,6 @@ def _build_csn_demo_candidate(test_id: str, candidate_id: str, ranking_score: fl
     computed_score, matches = _score_code(query_concepts, clusters)
 
     code_tokens = list(row.get("code_tokens") or [])
-    concept_matches = []
-    for match in matches:
-        concept_id = int(match["conceptId"])
-        q_indices = [idx for idx in match["queryTokenIndices"] if 0 <= idx < len(query_tokens)]
-        c_indices = [idx for idx in match["codeTokenIndices"] if 0 <= idx < len(code_tokens)]
-        if not q_indices or not c_indices:
-            continue
-        concept_matches.append(
-            {
-                "id": f"match_{concept_id}",
-                "conceptId": concept_id,
-                "queryTokenIndices": q_indices,
-                "codeTokenIndices": c_indices,
-                "lineNumber": match["lineNumber"],
-                "queryText": token_text(query_tokens, q_indices),
-                "codeText": token_text(code_tokens, c_indices),
-                "similarity": match["similarity"],
-                "color": CONCEPT_COLORS[concept_id % len(CONCEPT_COLORS)],
-            }
-        )
-
     display_concepts = _display_concepts(
         test_id,
         [
@@ -1495,6 +1732,57 @@ def _build_csn_demo_candidate(test_id: str, candidate_id: str, ranking_score: fl
         ],
     )
     display_concepts_by_id = {int(concept["conceptId"]): concept for concept in display_concepts}
+    if str(test_id) in CSN_DISPLAY_QUERY_OVERRIDES:
+        display_query_text, _ = _display_query(test_id, query_raw_text, query_tokens)
+        display_encoding = _extract_query_encoding(display_query_text)
+        visual_concepts: list[QueryConcept] = []
+        visual_concept_ids: list[int] = []
+        for display_concept in display_concepts:
+            concept_id = int(display_concept["conceptId"])
+            token_indices = [
+                int(index)
+                for index in display_concept["tokenIndices"]
+                if 0 <= int(index) < display_encoding.vectors.shape[0]
+            ]
+            if not token_indices:
+                continue
+            visual_concepts.append(
+                QueryConcept(
+                    indices=token_indices,
+                    centroid=F.normalize(display_encoding.vectors[token_indices].mean(dim=0), dim=0),
+                    weight=float(query_concepts[concept_id].weight),
+                )
+            )
+            visual_concept_ids.append(concept_id)
+        _, display_matches = _score_code(visual_concepts, clusters)
+        matches = [
+            {**match, "conceptId": visual_concept_ids[position]}
+            for position, match in enumerate(display_matches)
+        ]
+    concept_matches = []
+    for match in matches:
+        concept_id = int(match["conceptId"])
+        q_indices = [idx for idx in match["queryTokenIndices"] if 0 <= idx < len(display_query_tokens)]
+        c_indices = [idx for idx in match["codeTokenIndices"] if 0 <= idx < len(code_tokens)]
+        if not q_indices or not c_indices:
+            continue
+        concept_matches.append(
+            {
+                "id": f"match_{concept_id}",
+                "conceptId": concept_id,
+                "queryTokenIndices": q_indices,
+                "codeTokenIndices": c_indices,
+                "lineNumber": match["lineNumber"],
+                "queryText": token_text(display_query_tokens, q_indices),
+                "codeText": token_text(code_tokens, c_indices),
+                "similarity": match["similarity"],
+                "color": CONCEPT_COLORS[concept_id % len(CONCEPT_COLORS)],
+            }
+        )
+    concept_matches = [
+        match for match in concept_matches
+        if int(match["conceptId"]) in display_concepts_by_id
+    ]
     for match in concept_matches:
         display_concept = display_concepts_by_id.get(int(match["conceptId"]))
         if display_concept:
@@ -1509,6 +1797,17 @@ def _build_csn_demo_candidate(test_id: str, candidate_id: str, ranking_score: fl
                 "codeTokenIndices": [7],
                 "codeText": "bad_value",
                 "similarity": 0.451,
+            })
+
+    if str(test_id) == "csn_8884" and code_idx == CSN_CODE_OFFSET + 12324:
+        # The source candidate's branch-count statement is shown as L2 after
+        # the viewer omits its docstring line.
+        branch_match = next((match for match in concept_matches if int(match["conceptId"]) == 1), None)
+        if branch_match:
+            branch_match.update({
+                "lineNumber": 3,
+                "codeTokenIndices": list(range(8, 16)),
+                "codeText": "branches = len(node.handlers)",
             })
 
     if str(test_id) == "csn_11772" and code_idx == CSN_CODE_OFFSET + 29389:
@@ -1532,12 +1831,23 @@ def _build_csn_demo_candidate(test_id: str, candidate_id: str, ranking_score: fl
                 line_number, token_indices, code_text = display_match
                 concept_match.update({"lineNumber": line_number, "codeTokenIndices": token_indices, "codeText": code_text})
 
+    if str(test_id) == "csn_9388" and code_idx == CSN_CODE_OFFSET + 12695:
+        # The visible source clue is the guard that checks whether URL
+        # parameters exist, not the earlier URL formatting expression.
+        for concept_match in concept_matches:
+            if int(concept_match["conceptId"]) == 1:
+                concept_match.update({
+                    "lineNumber": 12,
+                    "codeTokenIndices": [55, 56, 57, 58, 59, 60],
+                    "codeText": "if not self.url_params:",
+                })
+
     raw_code = row.get("clean_code") or row.get("code") or row.get("original_string") or ""
     return {
         "id": f"code_{code_idx}",
         "testId": str(test_id),
         "codeIdx": code_idx,
-        "queryTokens": query_tokens,
+        "queryTokens": display_query_tokens,
         "rawCode": raw_code,
         "codeTokens": code_tokens,
         "codeLines": build_code_lines(raw_code, code_tokens),

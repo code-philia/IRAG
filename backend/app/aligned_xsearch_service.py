@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 from sklearn.cluster import AgglomerativeClustering
 
-from .config import API_BRIDGE_STEP7000_PACKED_PATH, CONCEPT_COLORS, CSN_11772_GEARS_STEP7000_CACHE_PATH, LATEST_STEP_CHECKPOINT_PATH, LOCAL_COCOSODA_PATH, TRAINING_EVAL_RESULTS_DIR, XSEARCH_ROOT
+from .config import API_BRIDGE_STEP7000_PACKED_PATH, CONCEPT_COLORS, CSN_11772_GEARS_STEP7000_CACHE_PATH, CSN_STUDY_DEV_FULL_TOKEN_CACHE_PATH, LATEST_STEP_CHECKPOINT_PATH, LOCAL_COCOSODA_PATH, TRAINING_EVAL_RESULTS_DIR, XSEARCH_ROOT
 from .data_service import build_code_lines, load_smoke_codebase, token_text
 
 
@@ -80,14 +80,27 @@ def csn_11772_gears_full_token_cache() -> dict[str, Any] | None:
     return payload
 
 
-def _subset_code_token_slots(url: str, code_token_index: int) -> list[int] | None:
-    subset = csn_11772_gears_full_token_cache()
-    if subset is None or url not in subset["urlIndex"]:
+@lru_cache(maxsize=1)
+def csn_study_dev_full_token_cache() -> dict[str, Any] | None:
+    """Load full-token representations for curated study-development sources."""
+    if not CSN_STUDY_DEV_FULL_TOKEN_CACHE_PATH.exists():
         return None
-    span = (subset.get("ori2curByUrl", {}).get(url, {}) or {}).get(str(code_token_index))
-    if not span:
-        return []
-    return list(range(int(span[0]) + 1, int(span[1]) + 1))
+    payload = torch.load(CSN_STUDY_DEV_FULL_TOKEN_CACHE_PATH, map_location="cpu")
+    if not isinstance(payload, dict) or payload.get("format") != "xsearch_step7000_full_token_subset_v1":
+        return None
+    payload["urlIndex"] = {str(url): index for index, url in enumerate(payload.get("urls", []))}
+    return payload
+
+
+def _subset_code_token_slots(url: str, code_token_index: int) -> list[int] | None:
+    for subset in (csn_11772_gears_full_token_cache(), csn_study_dev_full_token_cache()):
+        if subset is None or url not in subset["urlIndex"]:
+            continue
+        span = (subset.get("ori2curByUrl", {}).get(url, {}) or {}).get(str(code_token_index))
+        if not span:
+            return []
+        return list(range(int(span[0]) + 1, int(span[1]) + 1))
+    return None
 
 
 def _query_text(row: dict[str, Any]) -> str:
@@ -208,8 +221,9 @@ def get_aligned_query_vectors(test_id: str) -> tuple[list[str], np.ndarray] | No
 
 
 def _code_vectors_for_url(url: str):
-    subset = csn_11772_gears_full_token_cache()
-    if subset is not None and url in subset["urlIndex"]:
+    for subset in (csn_11772_gears_full_token_cache(), csn_study_dev_full_token_cache()):
+        if subset is None or url not in subset["urlIndex"]:
+            continue
         row = int(subset["urlIndex"][url])
         return subset["hidden"][row].detach().cpu().float(), subset["scores"][row].detach().cpu().float()
     hidden, scores, _urls, url_index = packed_step7000()

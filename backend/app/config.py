@@ -75,6 +75,7 @@ CSN_URL_MAPPED_API_DEMO_RANKINGS_PATH = ALIGNED_XSEARCH_DIR / "url_mapped_api_de
 SINGLE_REFERENCE_DEMO_RANKINGS_PATH = ALIGNED_XSEARCH_DIR / "single_reference_demo_rankings.json"
 API_BRIDGE_STEP7000_PACKED_PATH = ALIGNED_XSEARCH_DIR / "api_bridge_step7000_packed.pt"
 CSN_11772_GEARS_STEP7000_CACHE_PATH = ALIGNED_XSEARCH_DIR / "csn_11772_gears_step7000_full_tokens.pt"
+CSN_STUDY_DEV_FULL_TOKEN_CACHE_PATH = ALIGNED_XSEARCH_DIR / "csn_study_dev_full_tokens.pt"
 CSN_11772_GEARS_STEP7000_RANKINGS_PATH = ALIGNED_XSEARCH_DIR / "csn_11772_gears_step7000_rankings.json"
 CSN_API_BRIDGE_PREFIX_CACHE_PATH = ALIGNED_XSEARCH_DIR / "api_bridge_gt_prefix_cache.pt"
 USER_STUDY_STEP7000_CODE_CACHE_PATH = ALIGNED_XSEARCH_DIR / "user_study_step7000_code_topk_cache.pt"
@@ -88,7 +89,7 @@ CSN_FULL_STEP7000_CODE_CACHE_PATH = Path(
 CSN_GT_PREFIX_CACHE_PATH = Path(
     os.environ.get(
         "XSEARCH_CSN_GT_PREFIX_CACHE_PATH",
-        TRAINING_EVAL_RESULTS_DIR / "csn_gt_prefix_step7000_cache.pt",
+        ALIGNED_XSEARCH_DIR / "csn_gt_prefix_step7000_cache.pt",
     )
 )
 USER_STUDY_ROLES_PATH = XSEARCH_ROOT / "preprocess_dataset/role_tensor_python_40k_eval.npy"

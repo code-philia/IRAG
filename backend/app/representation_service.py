@@ -9,7 +9,13 @@ from typing import Any
 
 import numpy as np
 
-from .config import API_BRIDGE_STEP7000_PACKED_PATH, CSN_11772_GEARS_STEP7000_CACHE_PATH, ROOT_DIR, TRAINING_EVAL_RESULTS_DIR
+from .config import (
+    API_BRIDGE_STEP7000_PACKED_PATH,
+    CSN_11772_GEARS_STEP7000_CACHE_PATH,
+    CSN_STUDY_DEV_FULL_TOKEN_CACHE_PATH,
+    ROOT_DIR,
+    TRAINING_EVAL_RESULTS_DIR,
+)
 
 
 PACKED_PREFIX = "python_full"
@@ -79,6 +85,19 @@ def _csn_11772_gears_subset() -> dict[str, Any] | None:
 
 
 @lru_cache(maxsize=1)
+def _csn_study_dev_subset() -> dict[str, Any] | None:
+    if not CSN_STUDY_DEV_FULL_TOKEN_CACHE_PATH.exists():
+        return None
+    import torch
+
+    payload = torch.load(CSN_STUDY_DEV_FULL_TOKEN_CACHE_PATH, map_location="cpu")
+    if not isinstance(payload, dict) or payload.get("format") != "xsearch_step7000_full_token_subset_v1":
+        return None
+    payload["urlIndex"] = {str(item): index for index, item in enumerate(payload.get("urls", []))}
+    return payload
+
+
+@lru_cache(maxsize=1)
 def load_url_index() -> dict[str, int]:
     steps = discover_packed_steps()
     if not steps:
@@ -89,8 +108,12 @@ def load_url_index() -> dict[str, int]:
 
 
 def get_packed_timeline(url: str, requested_code_tokens: int) -> PackedTimeline | None:
-    subset = _csn_11772_gears_subset()
-    if subset is not None and url in subset["urlIndex"]:
+    for source, subset in (
+        ("csn_11772_gears_full_token_subset_cache", _csn_11772_gears_subset()),
+        ("csn_study_dev_full_token_subset_cache", _csn_study_dev_subset()),
+    ):
+        if subset is None or url not in subset["urlIndex"]:
+            continue
         row_index = int(subset["urlIndex"][url])
         hidden = subset["hidden"][row_index].detach().cpu()
         source_map = (subset.get("ori2curByUrl", {}).get(url, {}) or {})
@@ -107,7 +130,7 @@ def get_packed_timeline(url: str, requested_code_tokens: int) -> PackedTimeline 
             return None
         array = np.stack(vectors, axis=0)
         return PackedTimeline(
-            source="csn_11772_gears_full_token_subset_cache",
+            source=source,
             kind="last_layer_code_token_hidden",
             epochs=[1, 2, 3, 4],
             code_vectors_by_epoch=[array, array.copy(), array.copy(), array.copy()],

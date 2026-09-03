@@ -1,7 +1,8 @@
-# Interactive ConceptLens
+# Interactive RAG
 
-Interactive ConceptLens is a React and Python workspace for inspecting and
-editing query-code representation alignments in XSearch retrieval results.
+Interactive RAG is a React and Python workspace for inspecting, comparing, and
+editing query-code representation alignments before selecting code evidence for
+retrieval-augmented generation.
 
 ## Repository Scope
 
@@ -35,3 +36,16 @@ python backend/run_server.py
 
 The production deployment serves `frontend/dist` through Nginx and runs the
 Python API on `127.0.0.1:8765`.
+
+## Access Modes
+
+The same deployment exposes three URL-based modes:
+
+| Path | Purpose | Model and controls |
+| --- | --- | --- |
+| `/` | Interactive RAG demo | XSearch / CodeBERT selector and the full workspace. |
+| `/study` | User-study workspace | XSearch only, with the full Interactive RAG workflow. |
+| `/baseline` | Baseline workspace | XSearch only; plain Query and Code Viewer, Candidate List, and reference selection. |
+
+`/study` and `/baseline` record their mode in interaction logs and reference
+selection records so later evaluation can separate them from demo sessions.

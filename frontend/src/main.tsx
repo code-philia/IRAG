@@ -32,8 +32,8 @@ const APP_MODE: AppMode = window.location.pathname.startsWith("/baseline")
     : window.location.pathname.startsWith("/study")
       ? "study"
       : "demo";
-const FOCUS_TEST_IDS = [DEFAULT_TEST_ID, "48", "1556", "1642", "2695", "3856", "954", "csn_9848", "csn_11087", "csn_11078", "csn_9406", "csn_400", "csn_13958", "csn_13527", "csn_8838", "csn_7664", "csn_2613", "csn_12213", "csn_11772", "csn_2812", "csn_7727", "csn_4772", "csn_10023", "csn_2207", "csn_5340", "csn_10164", "csn_13655", "csn_14175", "csn_10643", "csn_12075"];
-const GENERATION_CASE_IDS = new Set(["csn_8838", "csn_7664", "csn_2613", "csn_12213", "csn_11772", "csn_584"]);
+const FOCUS_TEST_IDS = [DEFAULT_TEST_ID, "48", "1556", "1642", "2695", "3856", "954", "csn_9848", "csn_11087", "csn_11078", "csn_9406", "csn_400", "csn_13958", "csn_13527", "csn_8838", "csn_7664", "csn_2613", "csn_12213", "csn_11772", "csn_9388", "csn_2812", "csn_7727", "csn_4772", "csn_10023", "csn_2207", "csn_5340", "csn_10164", "csn_13655", "csn_14175", "csn_10643", "csn_12075"];
+const GENERATION_CASE_IDS = new Set(["csn_8838", "csn_7664", "csn_2613", "csn_12213", "csn_11772", "csn_8884", "csn_3846", "csn_42", "csn_9388"]);
 const GRAPH_WIDTH = 880;
 const GRAPH_HEIGHT = 560;
 const SUPPORT_QUERY_EVIDENCE_THRESHOLD = 0.55;
@@ -126,9 +126,12 @@ function createClientId(prefix: string) {
 
 function graphTokenLabel(token: string | number | null | undefined) {
   const cleaned = displayToken(token).trim();
-  if (!cleaned || /^[()[\]{}.,:;'"`=+\-*/%<>!|&]+$/.test(cleaned)) return "";
-  if (cleaned.length <= 14) return cleaned;
-  return `${cleaned.slice(0, 11)}...`;
+  if (!cleaned || cleaned.startsWith("#") || /^[()[\]{}.,:;'"`=+\-*/%<>!|&]+$/.test(cleaned)) return "";
+  return cleaned;
+}
+
+function selectedGraphTokenLabel(node: GraphNode, selected: boolean) {
+  return graphTokenLabel(node.label) || (selected ? displayToken(node.label).trim() : "");
 }
 
 function isSemanticToken(token: string | number | null | undefined) {
@@ -602,7 +605,7 @@ function HierarchicalCanvas({
         className={active ? "hierarchy-query-node active" : "hierarchy-query-node"}
         onClick={() => node.conceptId != null ? onConcept(node.conceptId) : onToken(tokenId)}
       >
-        <circle cx={node.x} cy={node.y} r="10" fill={concept?.color ?? "#64748b"} />
+        <circle cx={node.x} cy={node.y} r="13" fill={concept?.color ?? "#64748b"} />
         <text x={node.x + (placeLeft ? -15 : 15)} y={node.y + 4} textAnchor={placeLeft ? "end" : "start"} className="hierarchy-query-label">{label.length > 24 ? `${label.slice(0, 21)}...` : label}</text>
       </g>
     );
@@ -614,19 +617,21 @@ function HierarchicalCanvas({
           <div className="panel-title">Embedding Space</div>
           <div className="meta-line">{level === "block" ? "Semantic block overview" : level === "line" ? `Lines in ${selectedBlock?.label ?? "selected block"}` : "Token-level editing"}</div>
         </div>
-        <div className="hierarchy-breadcrumb">
-          {(["block", "line", "line_tokens", "token"] as CanvasLevel[]).map((item) => (
-            <button key={item} className={level === item ? "hierarchy-step active" : "hierarchy-step"} onClick={() => onLevel(item)} disabled={(item === "line" || item === "line_tokens") && !selectedBlock}>
-              {item === "block" ? "Blocks" : item === "line" ? "Lines" : item === "line_tokens" ? "Line Tokens" : "All Tokens"}
-            </button>
-          ))}
-          {level === "block" && selectedBlock ? <button className="hierarchy-open" onClick={() => onLevel("line")}>Open block</button> : null}
-          {level === "line" && selectedLine != null ? <button className="hierarchy-open" onClick={() => onLevel("line_tokens")}>Open line</button> : null}
-        </div>
-        <div className="canvas-viewport-tools" aria-label="Canvas zoom controls">
-          <button onClick={() => changeZoom(1.2)} title="Zoom in" aria-label="Zoom in"><ZoomIn size={15} /></button>
-          <button onClick={() => changeZoom(1 / 1.2)} title="Zoom out" aria-label="Zoom out"><ZoomOut size={15} /></button>
-          <button onClick={resetViewport} title="Reset view" aria-label="Reset view"><Maximize2 size={14} /></button>
+        <div className="canvas-head-controls">
+          <div className="hierarchy-breadcrumb">
+            {(["block", "line", "line_tokens", "token"] as CanvasLevel[]).map((item) => (
+              <button key={item} className={level === item ? "hierarchy-step active" : "hierarchy-step"} onClick={() => onLevel(item)} disabled={(item === "line" || item === "line_tokens") && !selectedBlock}>
+                {item === "block" ? "Blocks" : item === "line" ? "Lines" : item === "line_tokens" ? "Line Tokens" : "All Tokens"}
+              </button>
+            ))}
+            {level === "block" && selectedBlock ? <button className="hierarchy-open" onClick={() => onLevel("line")}>Open block</button> : null}
+            {level === "line" && selectedLine != null ? <button className="hierarchy-open" onClick={() => onLevel("line_tokens")}>Open line</button> : null}
+          </div>
+          <div className="canvas-viewport-tools" aria-label="Canvas zoom controls">
+            <button onClick={() => changeZoom(1.2)} title="Zoom in" aria-label="Zoom in"><ZoomIn size={15} /></button>
+            <button onClick={() => changeZoom(1 / 1.2)} title="Zoom out" aria-label="Zoom out"><ZoomOut size={15} /></button>
+            <button onClick={resetViewport} title="Reset view" aria-label="Reset view"><Maximize2 size={14} /></button>
+          </div>
         </div>
       </div>
       <svg ref={svgRef} className="graph hierarchy-graph" viewBox={`${viewX} ${viewY} ${viewWidth} ${viewHeight}`} role="img" onMouseDown={startPan} onMouseMove={movePan} onMouseUp={() => { panRef.current = null; }} onMouseLeave={() => { panRef.current = null; }}>
@@ -678,9 +683,9 @@ function HierarchicalCanvas({
           const label = graphTokenLabel(node.label);
           return Boolean(label) && (node.type === "query_token" || visibleLineTokenIndices.has(node.tokenIndex));
         }).map((node) => (
-          <g key={node.id} className={selectedTokenIds.includes(node.id) ? "hierarchy-node active" : "hierarchy-node"} onClick={() => onToken(node.id)}>
+          <g key={node.id} className={`${selectedTokenIds.includes(node.id) ? "hierarchy-node active" : "hierarchy-node"} ${node.type === "code_token" ? "code-token-node" : "query-token-node"}`} onClick={() => onToken(node.id)}>
             {node.type === "query_token"
-              ? <circle cx={node.x} cy={node.y} r="8" fill={node.color} />
+              ? <circle cx={node.x} cy={node.y} r="10" fill={node.color} />
               : <polygon points={trianglePoints(node.x, node.y, 9)} fill={node.color} />}
             <text x={node.x + 12} y={node.y + 4}>{graphTokenLabel(node.label)}</text>
           </g>
@@ -713,8 +718,8 @@ function computeDragMatches(
     const codeId = link.sourceType === "code_token" ? link.source : link.target;
     semantic.set(`${queryId}:${codeId}`, Math.max(semantic.get(`${queryId}:${codeId}`) ?? 0, link.similarity));
   });
-  const queryNodes = graph.nodes.filter((node) => node.type === "query_token");
-  const codeNodes = graph.nodes.filter((node) => node.type === "code_token");
+  const queryNodes = graph.nodes.filter((node) => node.type === "query_token" && Boolean(graphTokenLabel(node.label)));
+  const codeNodes = graph.nodes.filter((node) => node.type === "code_token" && Boolean(graphTokenLabel(node.label)));
   const oppositeNodes = draggedNode.type === "query_token" ? codeNodes : queryNodes;
   const distances = oppositeNodes.map((node) => {
     const a = originalPositionOf(draggedNode);
@@ -754,7 +759,9 @@ function computeDragMatches(
   const targetIdSet = new Set(targetIds);
   session.query.concepts.forEach((concept) => {
     candidate.codeLines.forEach((line) => {
-      const lineNodes = line.tokenIndices.map((idx) => nodeById.get(`c_tok_${idx}`)).filter((node): node is GraphNode => Boolean(node));
+      const lineNodes = line.tokenIndices
+        .map((idx) => nodeById.get(`c_tok_${idx}`))
+        .filter((node): node is GraphNode => Boolean(node && graphTokenLabel(node.label)));
       if (!lineNodes.length) return;
       const pairScores = concept.tokenIndices.flatMap((queryIndex) => {
         const queryNode = nodeById.get(`q_tok_${queryIndex}`);
@@ -1257,14 +1264,10 @@ function CandidatePanel({
             <span className="rank">#{candidate.rank}</span>
             <span className="candidate-main">
               <strong title={candidate.metadata.funcName || candidate.id}>{candidate.metadata.funcName || candidate.id}</strong>
-              <small title={candidate.metadata.path}>{candidate.metadata.path}</small>
-              {(candidate.dragSimilarity != null || candidate.rankDelta || candidate.similarityDelta) ? (
+              {candidate.originalRank != null && candidate.originalRank !== candidate.rank ? (
                 <small className={candidate.rankDelta && candidate.rankDelta > 0 ? "delta up" : "delta neutral"}>
                   {candidate.rankDelta && candidate.rankDelta > 0 ? <ArrowUp size={12} /> : candidate.rankDelta && candidate.rankDelta < 0 ? <ArrowDown size={12} /> : null}
-                  {candidate.originalRank != null && candidate.originalRank !== candidate.rank
-                    ? `Rank ${candidate.originalRank} -> ${candidate.rank} (delta ${candidate.rankDelta && candidate.rankDelta > 0 ? "+" : ""}${candidate.rankDelta ?? 0})`
-                    : `Rank delta ${candidate.rankDelta && candidate.rankDelta > 0 ? "+" : ""}${candidate.rankDelta ?? 0}`}
-                  {candidate.similarityDelta != null ? ` · sim ${candidate.similarityDelta > 0 ? "+" : ""}${candidate.similarityDelta.toFixed(3)}` : ""}
+                  {`Rank ${candidate.originalRank} -> ${candidate.rank} (delta ${candidate.rankDelta && candidate.rankDelta > 0 ? "+" : ""}${candidate.rankDelta ?? 0})`}
                 </small>
               ) : null}
               {showGroundTruth && modelId !== "codebert" && candidate.isGroundTruth ? <small className="ground-truth-label">Ground truth</small> : null}
@@ -1284,6 +1287,7 @@ function AdjudicationPanel({
   summaries,
   showGroundTruth = true,
   showEvidence = true,
+  showUncoveredEvidence = false,
   choosingReference = false,
   onChooseReference
 }: {
@@ -1292,6 +1296,7 @@ function AdjudicationPanel({
   summaries: Record<string, CandidateSummary>;
   showGroundTruth?: boolean;
   showEvidence?: boolean;
+  showUncoveredEvidence?: boolean;
   choosingReference?: boolean;
   onChooseReference: (candidate: CandidateDetail) => void;
 }) {
@@ -1302,7 +1307,7 @@ function AdjudicationPanel({
       <div className="adjudication-header">
         <div>
           <div className="panel-title">Candidate Adjudication</div>
-          <small>{showEvidence ? "Compare line-level concept evidence and uncovered implementation details." : "Compare the two code references before selecting one for generation."}</small>
+          <small>{showEvidence ? (showUncoveredEvidence ? "Compare line-level concept evidence and uncovered implementation details." : "Compare line-level concept evidence before selecting one for generation.") : "Compare the two code references before selecting one for generation."}</small>
         </div>
       </div>
       <div className="adjudication-columns">
@@ -1321,7 +1326,7 @@ function AdjudicationPanel({
               <div className="adjudication-lines">
                 {lines.map((line, index) => {
                   const matches = candidate.conceptMatches.filter((match) => match.codeTokenIndices.some((tokenIndex) => line.tokenIndices.includes(tokenIndex)));
-                  const uncovered = showEvidence && isAdjudicationUncoveredLine(line, matches);
+                  const uncovered = showEvidence && showUncoveredEvidence && isAdjudicationUncoveredLine(line, matches);
                   const indentation = line.text.match(/^\s*/)?.[0].length ?? 0;
                   const matchColors = matches
                     .map((match) => conceptById.get(Number(match.conceptId))?.color)
@@ -1881,10 +1886,6 @@ function CodeViewer({
     manualLinks.forEach((link) => map.set(link.codeTokenIndex, link));
     return map;
   }, [manualLinks]);
-  const dragByLine = useMemo(
-    () => new Map([...dragLineMatches, ...(candidate?.lineSimilarityTransitions ?? [])].map((match) => [match.lineNumber, match])),
-    [candidate?.lineSimilarityTransitions, dragLineMatches]
-  );
   const hierarchyBlocks = graph?.hierarchy?.blocks ?? [];
   const conceptList = session?.query.concepts ?? [];
   const blockWinners = useMemo(() => conceptWinnerMap(hierarchyBlocks, conceptList), [graph?.hierarchy?.blocks, session?.query.concepts]);
@@ -1939,7 +1940,6 @@ function CodeViewer({
         <div className="code-lines">
           {displayCodeLines.map((line) => {
             const lineSelected = selectedLineSet.has(line.lineNumber);
-            const dragLine = dragByLine.get(line.lineNumber);
             const tokenConceptSelected = line.tokenIndices.some((idx) => {
               const concepts = tokenConcepts.get(idx) ?? [];
               return concepts.some((concept) => selectedConceptSet.has(concept.conceptId));
@@ -2003,7 +2003,7 @@ function CodeViewer({
                       ? `${hierarchyColors[0]}18`
                       : `linear-gradient(90deg, ${hierarchyColors.map((color) => `${color}24`).join(", ")})`
                   } : undefined}
-                  onClick={() => canvasLevel === "block" && block ? onBlock(block.id) : onLine(line.lineNumber)}
+                  onClick={() => onLine(line.lineNumber)}
                 >
                   <span className="line-number">{displayedLineNumber}</span>
                   <span className="code-line-tokens">
@@ -2047,16 +2047,6 @@ function CodeViewer({
                       </Fragment>
                     );
                   })}
-                  {dragLine ? (
-                    <span className="drag-line-score">
-                      {dragLine.previousLineNumber != null && dragLine.previousLineNumber !== dragLine.lineNumber
-                        ? `best L${displayLineNumberByRaw.get(dragLine.previousLineNumber) ?? dragLine.previousLineNumber}->L${displayLineNumberByRaw.get(dragLine.lineNumber) ?? dragLine.lineNumber} `
-                        : "best "}
-                      {dragLine.baseline.toFixed(3)}-&gt;{dragLine.similarity.toFixed(3)}
-                      {" "}
-                      ({dragLine.delta >= 0 ? "+" : ""}{dragLine.delta.toFixed(3)})
-                    </span>
-                  ) : null}
                   {canvasLevel === "line" ? signalTexts.map((signalText) => <span key={signalText} className={`hierarchy-code-signal ${signalText === "weak concept evidence" ? "weak" : signalText === "uncovered code detail" ? "uncovered" : "latent"}`}>{signalText}</span>) : null}
                   </span>
                 </div>
@@ -2092,14 +2082,14 @@ function BaselineCodeViewer({
 type TokenCanvasProps = React.ComponentProps<typeof TokenVisualizationCanvas>;
 
 function VisualizationCanvas({
-  canvasLevel,
-  selectedBlockId,
-  lineTokenScope,
+  canvasLevel: _canvasLevel,
+  selectedBlockId: _selectedBlockId,
+  lineTokenScope: _lineTokenScope,
   queryPointMode,
-  onCanvasLevel,
+  onCanvasLevel: _onCanvasLevel,
   onQueryPointModeChange,
-  onBlock,
-  onHierarchyLine,
+  onBlock: _onBlock,
+  onHierarchyLine: _onHierarchyLine,
   onHierarchyConcept,
   ...tokenProps
 }: TokenCanvasProps & {
@@ -2116,43 +2106,7 @@ function VisualizationCanvas({
   const [showRecommendedTokens, setShowRecommendedTokens] = useState(false);
   useEffect(() => {
     setShowRecommendedTokens(false);
-  }, [tokenProps.candidate?.id, lineTokenScope]);
-  if (canvasLevel === "block" || canvasLevel === "line") {
-    return (
-      <HierarchicalCanvas
-        candidate={tokenProps.candidate}
-        session={tokenProps.session}
-        graph={tokenProps.graph}
-        level={canvasLevel}
-        selectedBlockId={selectedBlockId}
-        selectedLines={tokenProps.selectedLines}
-        selectedConcepts={tokenProps.selectedConcepts}
-        selectedTokenIds={tokenProps.selectedTokenIds}
-        onLevel={onCanvasLevel}
-        onBlock={onBlock}
-        onLine={onHierarchyLine}
-        onConcept={onHierarchyConcept}
-        onToken={(id) => {
-          const node = tokenProps.graph?.nodes.find((item) => item.id === id);
-          if (node) tokenProps.onNode(node);
-        }}
-      />
-    );
-  }
-  const selectedLineNumber = lineTokenScope;
-  const selectedBlock = tokenProps.graph?.hierarchy?.blocks.find((block) => block.id === selectedBlockId);
-  const lineTokenIndices = canvasLevel === "line_tokens" && selectedBlock && selectedLineNumber != null
-    ? new Set(tokenProps.graph?.hierarchy?.linesByBlock[selectedBlock.id]?.find((line) => line.lineNumber === selectedLineNumber)?.tokenIndices ?? [])
-    : null;
-  const lineTokenColorOverrides = (() => {
-    if (canvasLevel !== "line_tokens" || !selectedBlock || selectedLineNumber == null || !tokenProps.session) return {};
-    const blockLines = (tokenProps.graph?.hierarchy?.linesByBlock[selectedBlock.id] ?? [])
-      .map((line) => ({ ...line, id: `line_${line.lineNumber}` }));
-    const selectedLine = blockLines.find((line) => line.lineNumber === selectedLineNumber);
-    const matches = selectedLine ? conceptWinnerMap(blockLines, tokenProps.session.query.concepts).get(selectedLine.id) ?? [] : [];
-    const colors = matches.map((match) => match.concept.color);
-    return Object.fromEntries((selectedLine?.tokenIndices ?? []).map((tokenIndex) => [`c_tok_${tokenIndex}`, colors]));
-  })();
+  }, [tokenProps.candidate?.id]);
   const recommendedTokenIndices = new Set(tokenProps.graph?.hierarchy?.recommendedTokenIndices ?? []);
   const dragLinkedTokenIndices = (() => {
     if (!tokenProps.graph) return new Set<number>();
@@ -2162,38 +2116,38 @@ function VisualizationCanvas({
       return Boolean(position && Math.hypot(position.x - node.x, position.y - node.y) >= 2);
     });
     if (!draggedSeeds.length) return new Set<number>();
-    const seedKeys = new Set(
-      draggedSeeds
-        .map((node) => repeatedCodeTokenKey(node.label))
-        .filter(Boolean)
-    );
+    const seedKeys = new Set(draggedSeeds.map((node) => repeatedCodeTokenKey(node.label)).filter(Boolean));
     return new Set(tokenProps.graph.nodes
       .filter((node) => node.type === "code_token" && !draggedSeeds.some((seed) => seed.id === node.id) && seedKeys.has(repeatedCodeTokenKey(node.label)))
       .map((node) => node.tokenIndex));
   })();
   const visibleNodeFilter = tokenProps.graph
     ? new Set(tokenProps.graph.nodes.filter((node) => {
+        const selected = tokenProps.selectedTokenIds.includes(node.id);
+        if (!selectedGraphTokenLabel(node, selected)) return false;
         if (node.type === "query_token") {
           const belongsToConcept = node.conceptIds.length > 0;
           return !belongsToConcept
-            ? tokenProps.selectedTokenIds.includes(node.id)
+            ? selected
             : queryPointMode === "tokens";
         }
-        return canvasLevel !== "line_tokens"
-          || Boolean(lineTokenIndices?.has(node.tokenIndex))
-          || (showRecommendedTokens && recommendedTokenIndices.has(node.tokenIndex))
-          || dragLinkedTokenIndices.has(node.tokenIndex);
+        return true;
       }).map((node) => node.id))
     : null;
   return (
     <div className="token-canvas-shell">
-      <div className="token-level-switch hierarchy-breadcrumb">
-        {(["block", "line", "line_tokens", "token"] as CanvasLevel[]).map((item) => (
-          <button key={item} className={item === canvasLevel ? "hierarchy-step active" : "hierarchy-step"} onClick={() => onCanvasLevel(item)} disabled={(item === "line" || item === "line_tokens") && (!selectedBlockId || (item === "line_tokens" && selectedLineNumber == null))}>
-            {item === "block" ? "Blocks" : item === "line" ? "Lines" : item === "line_tokens" ? "Line Tokens" : "All Tokens"}
-          </button>
-        ))}
-        {canvasLevel === "line_tokens" && recommendedTokenIndices.size ? (
+      {dragLinkedTokenIndices.size ? <div className="related-suggestion-notice">Related token suggestion</div> : null}
+      <TokenVisualizationCanvas
+        {...tokenProps}
+        visibleNodeFilter={visibleNodeFilter}
+        canvasScope="all"
+        queryPointMode={queryPointMode}
+        onQueryConcept={onHierarchyConcept}
+        showRecommendedTokens={showRecommendedTokens}
+        linkedSuggestionTokenIndices={dragLinkedTokenIndices}
+        nodeColorOverrides={{}}
+        headerControls={<div className="token-level-switch hierarchy-breadcrumb">
+        {recommendedTokenIndices.size ? (
           <button
             type="button"
             className={showRecommendedTokens ? "hierarchy-open active" : "hierarchy-open"}
@@ -2218,9 +2172,8 @@ function VisualizationCanvas({
             Tokens
           </button>
         </span>
-      </div>
-      {canvasLevel === "line_tokens" && dragLinkedTokenIndices.size ? <div className="related-suggestion-notice">Related token suggestion</div> : null}
-      <TokenVisualizationCanvas {...tokenProps} visibleNodeFilter={visibleNodeFilter} canvasScope={canvasLevel === "line_tokens" ? "line" : "all"} queryPointMode={queryPointMode} onQueryConcept={onHierarchyConcept} showRecommendedTokens={showRecommendedTokens} linkedSuggestionTokenIndices={dragLinkedTokenIndices} nodeColorOverrides={lineTokenColorOverrides} />
+        </div>}
+      />
     </div>
   );
 }
@@ -2261,7 +2214,8 @@ function TokenVisualizationCanvas({
   onQueryConcept,
   showRecommendedTokens = false,
   linkedSuggestionTokenIndices = new Set<number>(),
-  nodeColorOverrides = {}
+  nodeColorOverrides = {},
+  headerControls
 }: {
   candidate: CandidateDetail | null;
   session: SessionPayload | null;
@@ -2299,6 +2253,7 @@ function TokenVisualizationCanvas({
   showRecommendedTokens?: boolean;
   linkedSuggestionTokenIndices?: Set<number>;
   nodeColorOverrides?: Record<string, string[]>;
+  headerControls?: React.ReactNode;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
@@ -2333,7 +2288,11 @@ function TokenVisualizationCanvas({
     () => new Set((graph?.hierarchy?.recommendedTokens ?? []).map((item) => item.conceptId)),
     [graph?.hierarchy?.recommendedTokens]
   );
-  const nodeIsVisible = (nodeId: string) => !visibleNodeFilter || visibleNodeFilter.has(nodeId);
+  const nodeIsVisible = (nodeId: string) => {
+    const node = nodeById.get(nodeId);
+    return Boolean(node && selectedGraphTokenLabel(node, selectedTokenSet.has(node.id)))
+      && (!visibleNodeFilter || visibleNodeFilter.has(nodeId));
+  };
   const externalImpactByNode = useMemo(() => {
     const map = new Map<string, ExternalImpact[]>();
     externalImpacts.forEach((impact) => {
@@ -2518,7 +2477,7 @@ function TokenVisualizationCanvas({
   const viewX = pan.x - viewWidth / 2;
   const viewY = pan.y - viewHeight / 2;
   const pointFor = (node: GraphNode) => dragPositions[node.id] ?? { x: node.x, y: node.y };
-  const recommendationLinks = showRecommendedTokens && canvasScope === "line" && session
+  const recommendationLinks = showRecommendedTokens && session
     ? [...recommendationByCodeToken.entries()].flatMap(([codeTokenIndex, conceptId]) => {
         const codeNode = nodeById.get(`c_tok_${codeTokenIndex}`);
         const concept = session.query.concepts.find((item) => item.conceptId === conceptId);
@@ -2531,37 +2490,62 @@ function TokenVisualizationCanvas({
     : [];
   const zoomEmphasis = clamp((zoom - 1.4) / 3.2, 0, 1);
   const shouldShowGraphNodeLabel = (node: GraphNode) => {
-    if (!graphTokenLabel(node.label)) return false;
+    if (!selectedGraphTokenLabel(node, selectedTokenSet.has(node.id))) return false;
+    const suggested = node.type === "code_token" && (
+      (showRecommendedTokens && recommendationTokenIndexSet.has(node.tokenIndex))
+      || linkedSuggestionTokenIndices.has(node.tokenIndex)
+    );
     return canvasScope === "line"
+      // At rest, reserve the label budget for the non-symbol tokens on
+      // concept-aligned code lines. The layout engine will hide only labels
+      // that genuinely collide, instead of truncating every token first.
+      || (canvasScope === "all" && node.type === "code_token" && node.conceptIds.length > 0)
+      || (canvasScope === "all" && node.type === "query_token" && queryPointMode === "tokens")
       || zoom > 1.85
       || selectedTokenSet.has(node.id)
       || selectedTargetSet.has(node.id)
       || isNodeActive(node)
+      || suggested
       || (!hasFocus && node.type === "query_token");
   };
   const graphLabelAnnotations = useMemo(() => {
     if (!graph) return new Map<string, HierarchyAnnotation>();
-    const isVisible = (nodeId: string) => !visibleNodeFilter || visibleNodeFilter.has(nodeId);
+    const isVisible = (nodeId: string) => nodeIsVisible(nodeId);
     const markerObstacles = [
       ...graph.nodes.filter((node) => isVisible(node.id)).map((node) => {
         const point = dragPositions[node.id] ?? { x: node.x, y: node.y };
-        return { x: point.x - 11, y: point.y - 11, width: 22, height: 22 };
+        const radius = node.type === "query_token" ? 15 : 11;
+        return { x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2 };
       }),
-      ...conceptDisplayNodes.map((node) => ({ x: node.x - 12, y: node.y - 12, width: 24, height: 24 }))
+      ...conceptDisplayNodes.map((node) => ({ x: node.x - 15, y: node.y - 15, width: 30, height: 30 }))
     ];
     const items: GraphLabelLayoutItem[] = graph.nodes.flatMap((node) => {
       if (!isVisible(node.id) || !shouldShowGraphNodeLabel(node)) return [];
       const point = dragPositions[node.id] ?? { x: node.x, y: node.y };
       const selected = selectedTokenSet.has(node.id) || selectedTargetSet.has(node.id);
       const active = isNodeActive(node);
-      const suggested = showRecommendedTokens && canvasScope === "line" && (
+      const suggested = showRecommendedTokens && (
         (node.type === "code_token" && recommendationTokenIndexSet.has(node.tokenIndex))
         || (node.type === "query_token" && node.conceptIds.some((id) => recommendationConceptIdSet.has(id))));
       const linked = (canvasScope === "line" || canvasScope === "all")
         && node.type === "code_token"
         && linkedSuggestionTokenIndices.has(node.tokenIndex);
-      const priority = selected ? 1100 : active ? 1000 : suggested || linked ? 900 : externalImpactByNode.has(node.id) ? 850 : node.type === "query_token" ? 700 : 200;
-      const label = graphTokenLabel(node.label);
+      const priority = suggested || linked
+        ? 1200
+        : selected || active || canvasScope === "line"
+        ? 1000
+        : canvasScope === "all" && node.type === "query_token" && queryPointMode === "tokens"
+          ? 1100
+        : node.type === "query_token"
+            ? 800
+        : node.conceptIds.length
+          ? 1080
+          : suggested || linked
+            ? 900
+            : externalImpactByNode.has(node.id)
+              ? 850
+              : 200;
+      const label = selectedGraphTokenLabel(node, selectedTokenSet.has(node.id));
       return [{ id: node.id, x: point.x, y: point.y, width: Math.max(34, label.length * 6.4 + 8), height: 18, priority }];
     });
     conceptDisplayNodes.forEach((node) => {
@@ -2600,6 +2584,7 @@ function TokenVisualizationCanvas({
     recommendationConceptIdSet,
     linkedSuggestionTokenIndices,
     externalImpactByNode,
+    queryPointMode,
     zoom,
     hasFocus
   ]);
@@ -2812,6 +2797,8 @@ function TokenVisualizationCanvas({
               : "waiting for projection"}
           </div>
         </div>
+        <div className="canvas-head-controls">
+        {headerControls}
         <button
             className={compareMode ? "canvas-action active" : "canvas-action"}
             onClick={() => setCompareMode((value) => !value)}
@@ -2827,6 +2814,7 @@ function TokenVisualizationCanvas({
             Embedding running
           </div>
         )}
+        </div>
       </div>
       <svg
         ref={svgRef}
@@ -3010,7 +2998,7 @@ function TokenVisualizationCanvas({
           .slice()
           .sort((a, b) => {
             const priority = (node: GraphNode) => {
-              const suggestion = showRecommendedTokens && canvasScope === "line" && (
+              const suggestion = showRecommendedTokens && (
                 (node.type === "code_token" && recommendationTokenIndexSet.has(node.tokenIndex)) ||
                 (node.type === "query_token" && node.conceptIds.some((id) => recommendationConceptIdSet.has(id))));
               const linkedSuggestion = (canvasScope === "line" || canvasScope === "all") && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
@@ -3039,9 +3027,14 @@ function TokenVisualizationCanvas({
           const isFollowerMarker = followerTrailIds.has(node.id);
           const externalImpactsForNode = externalImpactByNode.get(node.id) ?? [];
           const externallyImpacted = node.type === "code_token" && externalImpactsForNode.length > 0;
-          const recommendedSuggestion = showRecommendedTokens && canvasScope === "line" && node.type === "code_token" && recommendationByCodeToken.has(node.tokenIndex);
+          const recommendedSuggestion = showRecommendedTokens && node.type === "code_token" && recommendationByCodeToken.has(node.tokenIndex);
           const dragLinkedSuggestion = (canvasScope === "line" || canvasScope === "all") && node.type === "code_token" && linkedSuggestionTokenIndices.has(node.tokenIndex);
-          const motionRelevant = draggedTrailIds.has(node.id) || followerTrailIds.has(node.id) || dragColorsByNode.has(node.id) || externallyImpacted;
+          const motionRelevant = draggedTrailIds.has(node.id)
+            || followerTrailIds.has(node.id)
+            || dragColorsByNode.has(node.id)
+            || externallyImpacted
+            || recommendedSuggestion
+            || dragLinkedSuggestion;
           const dimmed = canvasScope !== "line" && ((hasFocus && !active && !motionRelevant) || lowPriority);
           const nodeOpacity = canvasScope === "line"
             ? 1
@@ -3052,10 +3045,10 @@ function TokenVisualizationCanvas({
               : dimmed
                 ? 0.34 + zoomEmphasis * 0.22
                 : 0.68 + zoomEmphasis * 0.22;
-          const label = graphTokenLabel(node.label);
+          const label = selectedGraphTokenLabel(node, selectedDirectly);
           const annotation = graphLabelAnnotations.get(node.id);
           const markerScale = selectedDirectly || selectedTarget ? 1.08 : localNeighbor ? 1.04 + zoomEmphasis * 0.12 : 1 + zoomEmphasis * 0.08;
-          const queryRadius = (active ? 8 : 5) * markerScale;
+          const queryRadius = (active ? 10 : 7) * markerScale;
           const codeRadius = (active ? 9 : 6) * markerScale;
           const overrideColors = nodeColorOverrides[node.id];
           const nodeFillColor = overrideColors?.length
@@ -3072,7 +3065,7 @@ function TokenVisualizationCanvas({
                 }
                 onNode(node);
               }}
-              className={`${active ? "graph-node active" : "graph-node"}${dimmed ? " dimmed" : ""}${signal ? ` neighbor-${signal.status}` : ""}${node.id === focusId ? " focus-node" : ""}${localNeighbor ? " local-neighbor" : ""}${isDragging ? " dragging" : ""}${isDraggedMarker ? " dragged-marker" : ""}${isFollowerMarker ? " follower-marker" : ""}`}
+              className={`${active ? "graph-node active" : "graph-node"} ${isQuery ? "query-token-node" : "code-token-node"}${dimmed ? " dimmed" : ""}${signal ? ` neighbor-${signal.status}` : ""}${node.id === focusId ? " focus-node" : ""}${localNeighbor ? " local-neighbor" : ""}${isDragging ? " dragging" : ""}${isDraggedMarker ? " dragged-marker" : ""}${isFollowerMarker ? " follower-marker" : ""}`}
               style={{ opacity: canvasScope === "line" || tokenFocus || zoom > 1.4 ? nodeOpacity : undefined }}
             >
               {externallyImpacted ? (
@@ -3136,7 +3129,7 @@ function TokenVisualizationCanvas({
           return (
             <g
               key={node.id}
-              className={active ? "graph-node active concept-display-node" : "graph-node concept-display-node"}
+              className={active ? "graph-node active concept-display-node query-concept-node" : "graph-node concept-display-node query-concept-node"}
               onMouseDown={(event) => handleNodeMouseDown(event, node)}
               onClick={() => {
                 if (suppressClickRef.current) {
@@ -3149,7 +3142,7 @@ function TokenVisualizationCanvas({
               <circle
                 cx={point.x}
                 cy={point.y}
-                r={active ? 10 : 8}
+                r={active ? 13 : 11}
                 fill={node.color}
                 stroke="#17202a"
                 strokeWidth={active ? 2.8 : 1.4}
@@ -3196,63 +3189,482 @@ function TokenVisualizationCanvas({
   );
 }
 
+function TaskBriefOverview() {
+  return <section className="assignment-section assignment-overview-section">
+    <div className="assignment-section-label">Task Overview</div>
+    <p>你不需要直接编写代码。请先阅读任务背景，然后从 20 个候选代码片段中选择一个最有助于后续生成目标实现的 Reference。</p>
+    <p>请根据任务需要判断哪段代码最值得参考；目标实现本身不在候选列表中。</p>
+  </section>;
+}
+
+function TaskBriefReferenceGoal({ points }: { points: string[] }) {
+  return <section className="assignment-section assignment-reference-goal-section">
+    <div className="assignment-section-label">Reference Goal</div>
+    <p>系统将提供 20 个候选代码片段，目标实现不在候选中。请选择 ONE Reference，作为后续代码生成的参考。</p>
+    <div className="assignment-reference-points">
+      <span>一个有价值的 Reference 应帮助你理解：</span>
+      <ul>{points.map((point) => <li key={point}>{point}</li>)}</ul>
+    </div>
+  </section>;
+}
+
 function TaskBriefPanel({ brief, onConfirm, onClose, ready = true }: { brief: TaskBrief; onConfirm: () => void; onClose?: () => void; ready?: boolean }) {
   const [acknowledged, setAcknowledged] = useState(false);
-  if (brief.caseId === "csn_11772") {
-    return <section className={`panel task-brief-panel issue-grounded-brief ${onClose ? "task-brief-readonly" : ""}`}>
-      <div className="issue-brief-header">
+  if (brief.caseId === "csn_12226") {
+    return <section className={`panel task-brief-panel assignment-task-brief api-result-task-brief ${onClose ? "task-brief-readonly" : ""}`}>
+      <div className="assignment-brief-header">
         <div>
-          <div className="issue-brief-kicker">Task Brief · CSN 11772</div>
-          <h2>理解项目已有知识，并选择一段可帮助后续实现的参考代码。</h2>
+          <div className="assignment-brief-kicker">Task Brief · CSN 12226</div>
+          <h2>处理删除 alarm 的 API response</h2>
         </div>
         {onClose ? <button onClick={onClose}>Close</button> : null}
       </div>
 
-      <div className="issue-brief-stages">
-        <section className="issue-brief-stage">
-          <div className="issue-stage-number">01</div>
-          <div className="github-issue-mock">
-            <div className="github-repo">gears <span>/</span> gears</div>
-            <div className="github-issue-title">Less support <span>#11</span></div>
-            <div className="github-issue-meta"><span className="issue-status">Open</span><span>rafales opened this issue · May 16, 2012 · 4 comments</span></div>
-            <div className="github-comment github-opening-comment">
-              <div className="github-comment-head"><span className="github-avatar avatar-rafales">r</span><strong>rafales</strong><span>commented</span></div>
-              <p>LESS files are compiled to CSS before later build operations. The current path makes LESS imports and shared variables difficult to preserve.</p>
-              <code>@import "other_file.css.less"</code>
-            </div>
-            <div className="github-comment">
-              <div className="github-comment-head"><span className="github-avatar avatar-yumike">y</span><strong>yumike</strong><span>commented</span></div>
-              <p>Gears should support simple source extensions such as <code>.less</code>, while the compiler integration remains separate.</p>
-            </div>
-            <div className="github-comment github-maintenance-comment">
-              <div className="github-comment-head"><span className="github-avatar avatar-rafales">r</span><strong>rafales</strong><span>follow-up</span></div>
-              <p>For compiled assets, the source filename and the compiler-produced content can carry different format information. The related <code>AssetAttributes</code> maintenance work needs to understand how Gears represents those details before extending its behavior.</p>
-            </div>
-            <a href="https://github.com/gears/gears/issues/11" target="_blank" rel="noreferrer">View original issue ↗</a>
+      <div className="assignment-brief-content">
+        <TaskBriefOverview />
+        <section className="assignment-section assignment-task-section">
+          <div className="assignment-section-label">Task</div>
+          <p>你正在维护一个删除 alarm 的 CLI command。上游已经完成 API 请求；当前任务是根据 response 的状态决定是否向终端输出内容。</p>
+        </section>
+
+        <div className="assignment-contract-grid api-result-contract-grid">
+          <section className="assignment-section assignment-input-section">
+            <div className="assignment-section-label">Input</div>
+            <h3>API response result</h3>
+            <p>当前结果包含 HTTP status 与 response body。删除操作成功时不需要额外反馈；失败时 response body 会说明错误原因。</p>
+          </section>
+          <section className="assignment-section assignment-output-section">
+            <div className="assignment-section-label">Output</div>
+            <h3>Terminal output</h3>
+            <p><code>200</code> 时保持安静。非 <code>200</code> 时向终端输出带颜色的 JSON error response。</p>
+          </section>
+        </div>
+
+        <section className="assignment-section assignment-example-section">
+          <div className="assignment-section-label">Result scenarios</div>
+          <div className="api-result-scenarios" aria-label="API response result scenarios">
+            <article className="api-result-card success">
+              <header><strong>Deletion succeeds</strong><code>HTTP 200</code></header>
+              <div><span>response body</span><code>{'{"status": "deleted"}'}</code></div>
+              <div className="api-terminal-output"><span>stdout</span><code>&lt;empty&gt;</code></div>
+            </article>
+            <article className="api-result-card error">
+              <header><strong>Target not found</strong><code>HTTP 404</code></header>
+              <div><span>response body</span><code>{'{"error": "Alarm not found"}'}</code></div>
+              <div className="api-terminal-output colorized"><span>stdout</span><code>{'{"error": "Alarm not found"}'}</code></div>
+            </article>
+            <article className="api-result-card error">
+              <header><strong>Server error</strong><code>HTTP 500</code></header>
+              <div><span>response body</span><code>{'{"error": "Internal server error"}'}</code></div>
+              <div className="api-terminal-output colorized"><span>stdout</span><code>{'{"error": "Internal server error"}'}</code></div>
+            </article>
           </div>
         </section>
 
-        <section className="issue-brief-stage">
-          <div className="issue-stage-number">02</div>
-          <h3>同一案例中的领域知识</h3>
-          <p>以 <code>styles/site.css.less</code> 为例，下面是开发者在代码库中能够获得的格式信息。</p>
-          <div className="issue-knowledge-list">
-            <div><span>Source extension</span><code>.less</code><small>源资源使用 LESS</small></div>
-            <div><span>Compiler</span><code>LESS compiler</code><small>将源内容转换为 CSS</small></div>
-            <div><span>Output MIME</span><code>compiler_mimetype = "text/css"</code><small>若不可用则可能为 <code>None</code></small></div>
-            <div><span>Environment mapping</span><code>.css ↔ text/css</code><small>项目已有的格式约定</small></div>
-          </div>
-          <p className="issue-muted">这些信息来自同一个 asset 的文件名、compiler 和环境配置；它们在项目代码中如何协同，需要通过检索已有实现来判断。</p>
-        </section>
-
-        <section className="issue-brief-stage">
-          <div className="issue-stage-number">03</div>
-          <h3>你的开发任务</h3>
-          <p>你正在接手一项相关维护工作，需要先理解项目如何连接 asset format、compiler 与 environment 中的格式信息。</p>
-          <div className="issue-query-label">Issue</div>
+        <section className="assignment-section assignment-query-section">
+          <div className="assignment-section-label">Query</div>
+          <p>处理当前 API response：成功删除时不输出；失败时将错误 JSON response 以终端颜色展示。</p>
           <blockquote>{brief.taskQuery}</blockquote>
-          <p>系统将提供 20 个候选代码片段；目标实现不在候选中。请选择一段最值得作为后续代码生成参考的 Reference，而不是寻找现成答案。</p>
         </section>
+        <TaskBriefReferenceGoal points={["CLI 如何读取 API response 的状态和 body。", "成功与失败结果如何走向不同的终端输出行为。", "JSON response 如何被处理为终端展示内容。"]} />
+      </div>
+
+      {!onClose ? <div className="issue-brief-actions">
+        <label className="task-brief-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> 我已阅读任务背景，并理解需要选择一个最有助于后续生成的 Reference。</label>
+        <button className={`task-brief-enter ${acknowledged && ready ? "ready" : ""}`} onClick={onConfirm} disabled={!acknowledged || !ready}>{ready ? acknowledged ? "进入任务" : "确认理解后进入任务" : "正在准备检索工作区..."}</button>
+      </div> : null}
+    </section>;
+  }
+  if (brief.caseId === "csn_3846") {
+    return <section className={`panel task-brief-panel assignment-task-brief decorator-task-brief ${onClose ? "task-brief-readonly" : ""}`}>
+      <div className="assignment-brief-header">
+        <div>
+          <div className="assignment-brief-kicker">Task Brief · CSN 3846</div>
+          <h2>判断 decorator 是否引用当前方法名称</h2>
+        </div>
+        {onClose ? <button onClick={onClose}>Close</button> : null}
+      </div>
+
+      <div className="assignment-brief-content">
+        <TaskBriefOverview />
+        <section className="assignment-section assignment-task-section">
+          <div className="assignment-section-label">任务背景介绍</div>
+          <p>你正在维护与 Python method decorator 相关的判定逻辑。当前任务是判断：某个 dotted decorator 是否引用了与当前 method 相同的名称。</p>
+          <div className="ast-dead-code-note"><strong>Dotted decorator</strong><span>Dotted decorator 是使用点号连接的 decorator 表达式，例如 <code>@x.setter</code>。其中 <code>x</code> 是点号左侧被引用的名称，<code>setter</code> 是在该名称上访问的 decorator 属性。</span></div>
+        </section>
+
+        <div className="assignment-contract-grid decorator-contract-grid">
+          <section className="assignment-section assignment-input-section">
+            <div className="assignment-section-label">Input</div>
+            <h3>Current method node</h3>
+            <p>当前对象表示一个带有方法名和 decorators 的 Python method。decorator 可以是普通名称，也可以是引用某个名称的 dotted form。</p>
+          </section>
+          <section className="assignment-section assignment-output-section">
+            <div className="assignment-section-label">Output</div>
+            <h3>Boolean result <small>True / False</small></h3>
+            <p>当某个 dotted decorator 左侧引用的名称与当前方法名相同时，返回 <code>True</code>；否则返回 <code>False</code>。</p>
+          </section>
+        </div>
+
+        <section className="assignment-section assignment-example-section">
+          <div className="assignment-section-label">Decision examples</div>
+          <div className="decorator-rule-grid" aria-label="Decorator redefinition decision examples">
+            <article><code>@property</code><code>def x(...)</code><strong className="decision-false">False</strong><span>普通 decorator 名称</span></article>
+            <article><code>@x.setter</code><code>def x(...)</code><strong className="decision-true">True</strong><span>引用相同名称</span></article>
+            <article><code>@x.deleter</code><code>def x(...)</code><strong className="decision-true">True</strong><span>引用相同名称</span></article>
+            <article><code>@y.setter</code><code>def x(...)</code><strong className="decision-false">False</strong><span>引用不同名称</span></article>
+            <article><code>@staticmethod</code><code>def x(...)</code><strong className="decision-false">False</strong><span>普通 decorator 名称</span></article>
+          </div>
+        </section>
+
+        <section className="assignment-section assignment-query-section">
+          <div className="assignment-section-label">Query</div>
+          <p>检查当前 method 的 decorators，判断其中引用的名称是否与当前 method name 相同。</p>
+          <blockquote>{brief.taskQuery}</blockquote>
+        </section>
+        <TaskBriefReferenceGoal points={["函数的 decorators 如何被访问并逐项检查。", "dotted decorator 如何表示它所引用的名称。", "如何从 AST 信息判断该名称是否与当前方法名相同。"]} />
+      </div>
+
+      {!onClose ? <div className="issue-brief-actions">
+        <label className="task-brief-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> 我已阅读任务背景，并理解需要选择一个最有助于后续生成的 Reference。</label>
+        <button className={`task-brief-enter ${acknowledged && ready ? "ready" : ""}`} onClick={onConfirm} disabled={!acknowledged || !ready}>{ready ? acknowledged ? "进入任务" : "确认理解后进入任务" : "正在准备检索工作区..."}</button>
+      </div> : null}
+    </section>;
+  }
+  if (brief.caseId === "csn_42") {
+    return <section className={`panel task-brief-panel assignment-task-brief cloud-sql-task-brief ${onClose ? "task-brief-readonly" : ""}`}>
+      <div className="assignment-brief-header">
+        <div>
+          <div className="assignment-brief-kicker">Task Brief · CSN 42</div>
+          <h2>等待 Cloud SQL 数据库删除完成</h2>
+        </div>
+        {onClose ? <button onClick={onClose}>Close</button> : null}
+      </div>
+
+      <div className="assignment-brief-content">
+        <TaskBriefOverview />
+        <section className="assignment-section assignment-task-section">
+          <div className="assignment-section-label">任务背景介绍</div>
+          <p>你正在删除 Cloud SQL 中的一个数据库。Cloud SQL 的删除接口采用异步操作：请求返回只表示删除任务已被接受，并不代表数据库已经删除。</p>
+          <div className="ast-region-list" aria-label="Cloud SQL asynchronous deletion flow">
+            <span>发送删除请求</span><span>获得本次 Operation</span><span>等待该 Operation 完成</span><span>成功后返回 None</span>
+          </div>
+          <p>函数必须跟踪这次删除请求返回的 Operation；只有确认该 Operation 成功完成后才能正常返回。如果 Operation 失败，则应报告相应错误。</p>
+        </section>
+
+        <div className="assignment-contract-grid">
+          <section className="assignment-section assignment-input-section">
+            <div className="assignment-section-label">Input</div>
+            <h3>要删除的 Cloud SQL database</h3>
+            <div className="format-term-list" aria-label="Cloud SQL delete input">
+              <div><strong>project_id</strong><span>Cloud SQL 项目的名称</span><code>demo-project</code></div>
+              <div><strong>instance</strong><span>承载 database 的数据库实例</span><code>prod-db</code></div>
+              <div><strong>database</strong><span>要删除的 database 名称</span><code>analytics</code></div>
+            </div>
+          </section>
+          <section className="assignment-section assignment-output-section">
+            <div className="assignment-section-label">Output</div>
+            <h3>成功时返回 None</h3>
+            <p>删除操作成功完成后，函数返回 <code>None</code>；此时目标数据库已不存在。如果后台 Operation 失败，应报告相应错误，而不是正常返回。</p>
+          </section>
+        </div>
+
+        <section className="assignment-section assignment-example-section">
+          <div className="assignment-section-label">测试场景（输入与输出）</div>
+          <div className="behavior-scenario-grid" aria-label="Cloud SQL database deletion behavior examples">
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 1 · 请求完成后删除完成</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p><code>demo-project / prod-db / analytics</code><br />后台删除操作已完成。</p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p>返回 <code>None</code>；<code>analytics</code> 已不存在。</p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 2 · 请求已接受，删除仍在后台进行</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p>删除请求已返回，但短时间内仍可找到 <code>analytics</code>。</p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p>函数继续等待后台操作完成；此时不应返回。</p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 3 · 等待本次请求对应的 Operation</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p>删除请求返回 <code>Operation B</code>，同时系统中存在其他 <code>Operation A</code>。</p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p>只跟踪并等待 <code>Operation B</code> 完成，然后返回 <code>None</code>。</p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-fail">
+              <header><strong>错误输出示例</strong><span>不能通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p>删除请求已被接受，但 <code>analytics</code> 仍存在。</p></div>
+              <div className="scenario-example-row"><span>错误输出</span><p>函数立刻返回 <code>None</code>，没有等待后台删除完成。</p></div>
+            </article>
+          </div>
+        </section>
+
+        <section className="assignment-section assignment-query-section">
+          <div className="assignment-section-label">Query</div>
+          <p>从 Cloud SQL instance 删除一个 database，并确保函数结束时删除已完成。</p>
+          <blockquote>{brief.taskQuery}</blockquote>
+        </section>
+        <TaskBriefReferenceGoal points={["类似云端 database 删除请求如何实际发送。", "请求返回后如何确认后台操作已经真正完成。", "如何区分请求已被接受与 database 已经删除。"]} />
+      </div>
+
+      {!onClose ? <div className="issue-brief-actions">
+        <label className="task-brief-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> 我已阅读任务背景，并理解需要选择一个最有助于后续生成的 Reference。</label>
+        <button className={`task-brief-enter ${acknowledged && ready ? "ready" : ""}`} onClick={onConfirm} disabled={!acknowledged || !ready}>{ready ? acknowledged ? "进入任务" : "确认理解后进入任务" : "正在准备检索工作区..."}</button>
+      </div> : null}
+    </section>;
+  }
+  if (brief.caseId === "csn_9388") {
+    return <section className={`panel task-brief-panel assignment-task-brief url-task-brief ${onClose ? "task-brief-readonly" : ""}`}>
+      <div className="assignment-brief-header">
+        <div>
+          <div className="assignment-brief-kicker">Task Brief · CSN 9388</div>
+          <h2>从 URL 中移除查询参数</h2>
+        </div>
+        {onClose ? <button onClick={onClose}>Close</button> : null}
+      </div>
+
+      <div className="assignment-brief-content">
+        <TaskBriefOverview />
+        <section className="assignment-section assignment-task-section">
+          <div className="assignment-section-label">任务背景介绍</div>
+          <p>你正在维护一个处理 URL 的小工具。一个 URL 可以包含 scheme、host、path、query 和 fragment。当前任务只移除 query（查询参数），其他部分保持不变。</p>
+          <div className="url-component-legend" aria-label="URL component terminology">
+            <span><code>scheme</code>协议</span><span><code>host</code>主机地址</span><span><code>path</code>路径</span><span><code>query</code>查询部分</span><span><code>fragment</code>片段标识</span>
+          </div>
+        </section>
+
+        <div className="assignment-contract-grid">
+          <section className="assignment-section assignment-input-section">
+            <div className="assignment-section-label">Input</div>
+            <h3>一个 URL 字符串</h3>
+            <p>URL 的 query component 位于 <code>?</code> 之后、<code>#</code> 之前。例如在 <code>?page=2#summary</code> 中，query component 是 <code>page=2</code>；<code>summary</code> 属于 fragment。</p>
+            <div className="url-segment-example" aria-label="URL components to preserve or remove">
+              <div className="url-segment preserve"><code>https://example.com/report.csv</code><span>保留</span></div>
+              <b className="url-segment-separator">|</b>
+              <div className="url-segment remove"><code>?page=2</code><span>删除</span></div>
+              <b className="url-segment-separator">|</b>
+              <div className="url-segment preserve"><code>#summary</code><span>保留</span></div>
+            </div>
+          </section>
+          <section className="assignment-section assignment-output-section">
+            <div className="assignment-section-label">Output</div>
+            <h3>移除 query component 后的 URL</h3>
+            <p>保留 scheme、网站地址、路径和 fragment，只让 <code>?</code> 后的查询参数消失。</p>
+            <div className="url-result-example"><code>https://example.com/report.csv</code><code>#summary</code></div>
+          </section>
+        </div>
+
+        <section className="assignment-section assignment-example-section">
+          <div className="assignment-section-label">测试场景（输入与输出）</div>
+          <div className="behavior-scenario-grid format-scenario-grid" aria-label="URL query removal behavior examples">
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 1 · 含查询参数和 fragment</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p><code>https://example.com/report.csv?page=2#summary</code></p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p><code>https://example.com/report.csv#summary</code></p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 2 · 含查询参数、不含 fragment</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p><code>http://example.test/v1/items;latest?limit=10</code></p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p><code>http://example.test/v1/items;latest</code></p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 3 · 没有查询参数</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p><code>https://example.com/landing#top</code></p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p>保持不变：<code>https://example.com/landing#top</code></p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-fail">
+              <header><strong>错误输出示例</strong><span>不能通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p><code>https://example.com/report.csv?page=2#summary</code></p></div>
+              <div className="scenario-example-row"><span>错误输出</span><p>连路径或 <code>#summary</code> 也被删除，或仍保留 <code>?page=2</code>。</p></div>
+            </article>
+          </div>
+        </section>
+
+        <section className="assignment-section assignment-query-section">
+          <div className="assignment-section-label">Query</div>
+          <p>读取 URL 的不同部分，重新组合出一个不含 query component 的 URL。</p>
+          <blockquote>{brief.taskQuery}</blockquote>
+        </section>
+        <TaskBriefReferenceGoal points={["代码如何读取和重新组合 URL 的不同部分。", "如何只改变 query component 而保留其他 URL 信息。", "同一代码库中已有的 URL 处理约定。"]} />
+      </div>
+
+      {!onClose ? <div className="issue-brief-actions">
+        <label className="task-brief-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> 我已阅读任务背景，并理解需要选择一个最有助于后续生成的 Reference。</label>
+        <button className={`task-brief-enter ${acknowledged && ready ? "ready" : ""}`} onClick={onConfirm} disabled={!acknowledged || !ready}>{ready ? acknowledged ? "进入任务" : "确认理解后进入任务" : "正在准备检索工作区..."}</button>
+      </div> : null}
+    </section>;
+  }
+  if (brief.caseId === "csn_8884") {
+    return <section className={`panel task-brief-panel assignment-task-brief ast-task-brief ${onClose ? "task-brief-readonly" : ""}`}>
+      <div className="assignment-brief-header">
+        <div>
+          <div className="assignment-brief-kicker">Task Brief · CSN 8884</div>
+          <h2>清理 Try AST 中的 dead code</h2>
+        </div>
+        {onClose ? <button onClick={onClose}>Close</button> : null}
+      </div>
+
+      <div className="assignment-brief-content">
+        <TaskBriefOverview />
+        <section className="assignment-section assignment-task-section">
+          <div className="assignment-section-label">任务背景介绍</div>
+          <p>你正在维护一个 Python AST optimizer，需要处理 <code>try</code> statement 对应的 AST node。当前任务是清理其中不可到达的 dead code，同时保持 <code>try / except</code> 的控制流结构和源码位置信息有效。</p>
+          <div className="ast-dead-code-note"><strong>Dead code</strong><span>在某个执行区域中，若控制流已被 <code>return</code>、<code>raise</code> 等语句终止，后续 statements 可能不可到达。</span></div>
+        </section>
+
+        <div className="assignment-contract-grid ast-contract-grid">
+          <section className="assignment-section assignment-input-section">
+            <div className="assignment-section-label">Input</div>
+            <h3>Try AST node <small>node: ast.Try</small></h3>
+            <p>当前输入表示一个 Python <code>try</code> statement 的 AST 节点，并包含多个执行区域。</p>
+            <div className="ast-region-list" aria-label="Try execution regions">
+              <span>Try body</span><span>Except handler(s)</span><span>Else branch</span><span>Finally branch</span>
+            </div>
+          </section>
+          <section className="assignment-section assignment-output-section">
+            <div className="assignment-section-label">Output</div>
+            <h3>Optimized Try AST <small>Optional[ast.AST]</small></h3>
+            <ul className="ast-output-list">
+              <li>移除不可到达的 statements</li>
+              <li>保持原有 <code>try / except</code> 控制流结构</li>
+              <li>保持 source-location metadata 有效</li>
+            </ul>
+          </section>
+        </div>
+
+        <section className="assignment-section assignment-example-section">
+          <div className="assignment-section-label">Before and after</div>
+          <div className="ast-before-after-diagram" aria-label="Dead code removal preserves Try AST regions and source location metadata">
+            <article className="ast-diagram-state">
+              <div className="ast-diagram-title">Before Optimization · Try AST</div>
+              <div className="ast-diagram-regions">
+                <div><strong>Try body</strong><span>Return</span></div>
+                <div><strong>Except handler(s)</strong><span>...</span></div>
+                <div><strong>Else branch</strong><span>Return</span><em><span>Statement (dead)</span><b aria-label="removed">×</b></em></div>
+                <div><strong>Finally branch</strong><span>Raise</span><em><span>Statement (dead)</span><b aria-label="removed">×</b></em></div>
+              </div>
+            </article>
+            <div className="ast-diagram-arrow" aria-hidden="true"><span>Remove unreachable statements</span><b>→</b></div>
+            <article className="ast-diagram-state ast-diagram-output">
+              <div className="ast-diagram-title">After Optimization · Try AST</div>
+              <div className="ast-diagram-regions">
+                <div><strong>Try body</strong><span>Return</span><small>preserved</small></div>
+                <div><strong>Except handler(s)</strong><span>...</span><small>preserved</small></div>
+                <div><strong>Else branch</strong><span>Return</span><small>preserved</small></div>
+                <div><strong>Finally branch</strong><span>Raise</span><small>preserved</small></div>
+              </div>
+            </article>
+            <div className="ast-diagram-preservation">
+              <span className="ast-dead-code-removed-note">Dead statements appear only before optimization.</span>
+              <strong>Preserve:</strong>
+              <span>try / except branch structure</span>
+              <span>source-location metadata</span>
+            </div>
+          </div>
+        </section>
+
+        <section className="assignment-section assignment-example-section">
+          <div className="assignment-section-label">测试场景（输入与输出）</div>
+          <div className="behavior-scenario-grid" aria-label="Try AST optimization behavior examples">
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 1 · 清理 Try body</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p><code>Try body: Return → Statement (dead)</code><br /><code>Except handler(s): ...</code></p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p><code>Try body: Return</code><br />后续 dead statement 被移除；<code>except</code> handler 仍保留。</p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 2 · 清理所有区域</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p><code>Else: Return → Statement (dead)</code><br /><code>Finally: Raise → Statement (dead)</code></p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p><code>Else: Return</code><br /><code>Finally: Raise</code><br />两个区域中的 dead statement 都被移除。</p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 3 · 保持结构有效</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p><code>2 except handlers + else + finally</code><br />所有 statements 都可到达。</p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p>输出保留两个 handlers、<code>else</code>、<code>finally</code> 和所有 statements；source location 仍有效。</p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-fail">
+              <header><strong>错误输出示例</strong><span>不能通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p><code>Else: Return → Statement (dead)</code><br /><code>Finally: Raise → Statement (dead)</code></p></div>
+              <div className="scenario-example-row"><span>错误输出</span><p>只清理 <code>Try body</code>，但 <code>else</code> 或 <code>finally</code> 中仍有 dead statement。</p></div>
+            </article>
+          </div>
+        </section>
+
+        <section className="assignment-section assignment-query-section">
+          <div className="assignment-section-label">Query</div>
+          <p>对当前 <code>Try</code> AST，清理各执行区域中不可到达的代码。</p>
+          <blockquote>{brief.taskQuery}</blockquote>
+        </section>
+        <TaskBriefReferenceGoal points={["项目如何遍历并重写包含多个 statement list 的 AST 节点。", "如何处理 control-flow node 中需要清理的 statement regions。", "AST 变换后如何保持节点结构和 source-location information 有效。"]} />
+      </div>
+
+      {!onClose ? <div className="issue-brief-actions">
+        <label className="task-brief-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> 我已阅读任务背景，并理解需要选择一个最有助于后续生成的 Reference。</label>
+        <button className={`task-brief-enter ${acknowledged && ready ? "ready" : ""}`} onClick={onConfirm} disabled={!acknowledged || !ready}>{ready ? acknowledged ? "进入任务" : "确认理解后进入任务" : "正在准备检索工作区..."}</button>
+      </div> : null}
+    </section>;
+  }
+  if (brief.caseId === "csn_11772") {
+    return <section className={`panel task-brief-panel assignment-task-brief ${onClose ? "task-brief-readonly" : ""}`}>
+      <div className="assignment-brief-header">
+        <div>
+          <div className="assignment-brief-kicker">Task Brief · CSN 11772</div>
+          <h2>为处理后的文件确定正确的后缀</h2>
+        </div>
+        {onClose ? <button onClick={onClose}>Close</button> : null}
+      </div>
+
+      <div className="assignment-brief-content">
+        <TaskBriefOverview />
+        <section className="assignment-section assignment-task-section">
+          <div className="assignment-section-label">Task</div>
+          <p>有些文件会先经过工具处理，处理后的文件格式可能与原文件不同。当前能够读取到的文件不包含原始文件路径，因此不能从类似 <code>example.less</code> 的文件名读取后缀；需要根据处理后的文件格式，为当前文件推断应使用的后缀。</p>
+        </section>
+
+        <div className="assignment-contract-grid">
+          <section className="assignment-section assignment-input-section">
+            <div className="assignment-section-label">Input</div>
+            <h3>一个 MIME type</h3>
+            <p>输入只有处理工具给出的 <strong>MIME type</strong>。它是一段用来说明“处理结果是什么类型文件”的文字标签，例如 <code>text/coffeescript</code>。</p>
+            <div className="format-term-list" aria-label="Format term definitions">
+              <div><strong>MIME type</strong><span>处理结果的文件类型标签</span><code>text/coffeescript</code></div>
+            </div>
+            <p>项目环境中已经保存了处理结果格式与文件后缀之间的对应关系；任务需要利用这个既有信息完成推断。</p>
+          </section>
+          <section className="assignment-section assignment-output-section">
+            <div className="assignment-section-label">Output</div>
+            <h3>处理结果应使用的文件后缀 <small>Optional[str]</small></h3>
+            <p>文件后缀是文件名最后一个点号后的短标记，例如 <code>.coffee</code>。输出是与输入 MIME type 对应的后缀；若项目不知道这个 MIME type 对应什么后缀，则输出 <code>None</code>，表示不添加后缀。</p>
+          </section>
+        </div>
+
+        <section className="assignment-section assignment-example-section">
+          <div className="assignment-section-label">测试场景（输入与输出）</div>
+          <div className="behavior-scenario-grid format-scenario-grid" aria-label="Compiled asset extension behavior examples">
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 1 · 已知格式</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p>处理工具报告 MIME type：<code>text/coffeescript</code></p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p><code>.coffee</code></p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 2 · 另一种已知格式</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p>处理工具报告 MIME type：<code>text/x-template</code></p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p><code>.tmpl</code></p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-pass">
+              <header><strong>测试 3 · 没有已知对应</strong><span>通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p>处理工具报告的 MIME type 在项目环境中没有已知对应关系。</p></div>
+              <div className="scenario-example-row"><span>期望输出</span><p><code>None</code>，表示不添加后缀。</p></div>
+            </article>
+            <article className="behavior-scenario-card scenario-fail">
+              <header><strong>错误输出示例</strong><span>不能通过</span></header>
+              <div className="scenario-example-row"><span>输入</span><p>处理工具报告 MIME type：<code>text/coffeescript</code></p></div>
+              <div className="scenario-example-row"><span>错误输出</span><p>返回 <code>None</code> 或任意无关后缀，而不是已知对应的 <code>.coffee</code>。</p></div>
+            </article>
+          </div>
+        </section>
+
+        <section className="assignment-section assignment-query-section">
+          <div className="assignment-section-label">Query</div>
+          <p>读取处理工具报告的 MIME type，并找出处理结果应使用的文件后缀。</p>
+          <blockquote>{brief.taskQuery}</blockquote>
+        </section>
+        <TaskBriefReferenceGoal points={["如何取得处理工具报告的 MIME type。", "项目如何记录 MIME type 与文件后缀的对应关系。", "如何从 MIME type 找到处理结果应使用的后缀。"]} />
       </div>
 
       {!onClose ? <div className="issue-brief-actions">
@@ -3294,16 +3706,6 @@ function TaskBriefPanel({ brief, onConfirm, onClose, ready = true }: { brief: Ta
               <div className="github-comment-head"><span className="github-avatar avatar-yumike">s</span><strong>surgan12</strong><span>follow-up</span></div>
               <p>For the random transform, the transform layer can generate random destination vertices and pass the resulting geometry to the functional perspective operation.</p>
             </div>
-            <div className="github-comment">
-              <div className="github-comment-head"><span className="github-avatar avatar-rafales">f</span><strong>fmassa</strong><span>follow-up</span></div>
-              <p>Users should be able to control how strong the random perspective distortion can be. Small values should keep the transformed geometry close to the original image, while larger values may allow stronger distortion.</p>
-              <code>Review outcome · distortion_scale</code>
-            </div>
-            <div className="github-comment github-maintenance-comment">
-              <div className="github-comment-head"><strong>Maintenance context</strong></div>
-              <p>The API design now makes a useful distinction: the RandomPerspective layer produces geometric parameters, while downstream perspective code consumes those parameters to perform the image transformation.</p>
-              <p>The current maintenance task is to understand what parameter structure the repository expects before implementing the random parameter-generation step.</p>
-            </div>
             <a href="https://github.com/pytorch/vision/issues/779" target="_blank" rel="noreferrer">View original issue ↗</a>
             <a href="https://github.com/pytorch/vision/pull/781" target="_blank" rel="noreferrer">View implementation PR ↗</a>
           </div>
@@ -3312,21 +3714,21 @@ function TaskBriefPanel({ brief, onConfirm, onClose, ready = true }: { brief: Ta
         <section className="issue-brief-stage">
           <div className="issue-stage-number">02</div>
           <h3>同一案例中的项目知识</h3>
-          <p>下面沿用同一个 RandomPerspective 场景，说明开发者在进入代码检索前需要掌握的几何表示与 API 信息。</p>
+          <p>下面沿用同一个 RandomPerspective 场景，说明开发者在进入代码检索前需要掌握的最低限度项目知识。</p>
           <div className="issue-knowledge-list">
-            <div><span>Image geometry</span><code>width = 12 · height = 10</code><small>图像坐标以左上角为原点；宽高决定原图四个边界角点的位置。TL · TR · BR · BL</small></div>
-            <div><span>Perspective parameters</span><code>startpoints · endpoints</code><small>两组四个二维角点分别描述原图几何与变换后的几何，并保持相同角点顺序。</small></div>
-            <div><span>Random distortion</span><code>distortion_scale = 0.5</code><small>控制允许的透视变化强度；较小值更接近原图，较大值允许更强的变换。</small></div>
-            <div><span>Downstream transform</span><code>point sets → coefficients → perspective transform</code><small>下游 perspective 代码消费两组点，并将几何信息转换为执行图像变换所需的数据。</small></div>
+            <div><span>Perspective geometry</span><code>original quadrilateral → transformed quadrilateral</code><small>一次 perspective transform 可以通过变换前和变换后的两个四边形来描述。</small></div>
+            <div><span>Perspective parameters</span><code>startpoints · endpoints</code><small>startpoints 表示原始几何，endpoints 表示变换后的几何。</small></div>
+            <div><span>Point structure</span><code>4 × (x, y)</code><small>每组数据包含四个二维角点，并采用 TL → TR → BR → BL 的顺序。</small></div>
+            <div><span>RandomPerspective</span><code>random destination geometry</code><small>它生成随机的 destination geometry，再交给后续 perspective operation。</small></div>
           </div>
-          <p className="issue-muted">这些信息定义了 RandomPerspective 需要产生的数据类型与高层语义；具体如何根据图像尺寸和 distortion_scale 构造一组有效的随机参数，需要通过检索项目已有实现进一步判断。</p>
+          <p className="issue-muted">这些信息定义了 RandomPerspective 需要产生的数据类型与高层几何语义；具体如何根据图像尺寸和随机强度构造一组有效参数，需要通过检索项目已有代码进一步判断。</p>
         </section>
 
         <section className="issue-brief-stage">
           <div className="issue-stage-number">03</div>
           <h3>你的开发任务</h3>
-          <p>你正在接手 TorchVision 中 RandomPerspective 的一项相关维护工作。现有 API 已使用 startpoints 和 endpoints 描述 perspective geometry，并允许通过 distortion_scale 控制随机变换强度。现在需要实现负责生成这些 perspective parameters 的部分。</p>
-          <p>你希望先理解项目中这些参数如何被下游代码使用，以及一组有效参数需要满足怎样的结构关系，因此决定检索已有实现并选择一个参考代码。</p>
+          <p>你正在接手 TorchVision 中 RandomPerspective 的相关功能实现。现有 perspective API 已使用 startpoints 和 endpoints 表示变换前后的几何。对于 RandomPerspective，还需要在调用后续 perspective operation 之前，根据图像尺寸和随机变换设置生成这两组参数。</p>
+          <p>其中 <code>distortion_scale</code> 表示允许的随机透视变化强度。为了理解项目已有代码对这些参数的结构和使用方式有什么要求，你决定先检索代码库中的相关实现，并选择一段可用于后续代码生成的 Reference。</p>
           <div className="issue-query-label">Issue</div>
           <blockquote>{brief.taskQuery}</blockquote>
           <p>系统将提供 20 个候选代码片段；目标实现不在候选中。请选择一段最值得作为后续代码生成参考的 Reference，而不是寻找现成答案。</p>
@@ -3458,7 +3860,7 @@ function GenerationPanel({
         </details>
       </div>
       <section className="generation-reference-analysis" aria-label="Reference hint">
-        {!hint ? <><div className="panel-title">Need help understanding this reference?</div><button onClick={onHint} disabled={hintLoading}>{hintLoading ? "Loading hint..." : "Show Hint"}</button></> : <><div className="panel-title">Reference Hint</div><div className="reference-hint"><strong>What it does</strong><p>{hint.whatItDoes}</p><strong>Useful clue</strong><p>{hint.usefulClue}</p></div></>}
+        {!hint ? <div className="generation-reference-analysis-header"><div className="panel-title">Need help understanding this reference?</div><button onClick={onHint} disabled={hintLoading}>{hintLoading ? "Loading hint..." : "Show Hint"}</button></div> : <><div className="panel-title">Reference Hint</div><div className="reference-hint"><strong>What it does</strong><p>{hint.whatItDoes}</p><strong>Useful clue</strong><p>{hint.usefulClue}</p></div></>}
       </section>
       <div className="generation-actions">
         <button className="primary" onClick={() => onGenerate("interactive_rag")} disabled={loading}>{loading ? <Loader2 size={16} className="spin" /> : <CirclePlay size={16} />} Generate With Selected Reference</button>
@@ -3569,7 +3971,11 @@ function App() {
   const cacheGenerationRef = useRef(0);
   const [playing, setPlaying] = useState(false);
   const [focusPaneOrder, setFocusPaneOrder] = useState<"graph-first" | "code-first">("code-first");
-  const [canvasLevel, setCanvasLevel] = useState<CanvasLevel>("block");
+  const [codePaneWidth, setCodePaneWidth] = useState(960);
+  const [resizingFocusPanes, setResizingFocusPanes] = useState(false);
+  const focusPanesRef = useRef<HTMLDivElement | null>(null);
+  const focusPaneResizeRef = useRef<{ pointerId: number; startX: number; startCodePaneWidth: number; maxCodePaneWidth: number } | null>(null);
+  const [canvasLevel, setCanvasLevel] = useState<CanvasLevel>("token");
   const [queryPointMode, setQueryPointMode] = useState<QueryPointMode>("tokens");
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [lineTokenScope, setLineTokenScope] = useState<number | null>(null);
@@ -3630,6 +4036,7 @@ function App() {
   const [hintLoading, setHintLoading] = useState(false);
   const hintOpenedAtRef = useRef<number | null>(null);
   const loadRequestRef = useRef(0);
+  const dragRerankRequestRef = useRef(0);
   const generationPreviewRequestRef = useRef(0);
 
   useEffect(() => {
@@ -3647,7 +4054,9 @@ function App() {
     getExperiments()
       .then((data) => {
         if (!isDemo) {
-          const studyTests = ["csn_11772", "csn_584"];
+          const studyTests = appMode === "study_dev"
+            ? ["csn_11772", "csn_8884", "csn_3846", "csn_42", "csn_9388"]
+            : ["csn_11772", "csn_8884", "csn_3846", "csn_42", "csn_9388"];
           setTests(studyTests);
           setTestId((currentTestId) => studyTests.includes(currentTestId) ? currentTestId : studyTests[0]);
           return;
@@ -3748,6 +4157,7 @@ function App() {
 
   async function loadAll(nextTestId = testId) {
     const requestId = ++loadRequestRef.current;
+    ++dragRerankRequestRef.current;
     resetPayloadCaches();
     const cacheGeneration = cacheGenerationRef.current;
     setLoading(true);
@@ -3824,7 +4234,7 @@ function App() {
       setSelectedDragMatchKey(null);
       setLinkDraft(null);
       setPlaying(false);
-      setCanvasLevel("block");
+      setCanvasLevel("token");
       setSelectedBlockId(null);
       setLineTokenScope(null);
       setDragMode(false);
@@ -3881,7 +4291,7 @@ function App() {
       setManualLinks(manualLinkStore[manualLinkKey(session.testId, next.id)] ?? []);
       setLinkDraft(null);
       setPlaying(false);
-      setCanvasLevel((current) => current === "line" || current === "line_tokens" ? "block" : current);
+      setCanvasLevel("token");
       setSelectedBlockId(null);
       setLineTokenScope(null);
       setDragMode(false);
@@ -3926,6 +4336,53 @@ function App() {
       return next;
     });
   }
+
+  function boundedCodePaneWidth(nextWidth: number) {
+    const workspaceWidth = focusPanesRef.current?.getBoundingClientRect().width ?? 0;
+    const maxCodePaneWidth = workspaceWidth > 0 ? Math.max(280, Math.min(1100, workspaceWidth - 372)) : 1100;
+    return clamp(nextWidth, 280, maxCodePaneWidth);
+  }
+
+  function beginFocusPaneResize(event: React.PointerEvent<HTMLDivElement>) {
+    const workspaceWidth = focusPanesRef.current?.getBoundingClientRect().width ?? 0;
+    if (workspaceWidth <= 0) return;
+    const maxCodePaneWidth = Math.max(280, Math.min(1100, workspaceWidth - 372));
+    focusPaneResizeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startCodePaneWidth: codePaneWidth,
+      maxCodePaneWidth,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setResizingFocusPanes(true);
+  }
+
+  function moveFocusPaneResize(event: React.PointerEvent<HTMLDivElement>) {
+    const resize = focusPaneResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    setCodePaneWidth(clamp(resize.startCodePaneWidth + event.clientX - resize.startX, 280, resize.maxCodePaneWidth));
+  }
+
+  function endFocusPaneResize(event: React.PointerEvent<HTMLDivElement>) {
+    if (focusPaneResizeRef.current?.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    focusPaneResizeRef.current = null;
+    setResizingFocusPanes(false);
+  }
+
+  function adjustCodePaneWidth(delta: number) {
+    setCodePaneWidth((current) => boundedCodePaneWidth(current + delta));
+  }
+
+  useEffect(() => {
+    const paneContainer = focusPanesRef.current;
+    if (!paneContainer) return;
+    const constrainPaneWidth = () => setCodePaneWidth((current) => boundedCodePaneWidth(current));
+    constrainPaneWidth();
+    const observer = new ResizeObserver(constrainPaneWidth);
+    observer.observe(paneContainer);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!session || adjudicationIds.length !== 2) return;
@@ -4210,6 +4667,9 @@ function App() {
     setDragMatchesByCandidate((current) => ({ ...current, [candidate.id]: matches }));
     setSelectedDragMatchKey(null);
     if (!matches.pairInterventions.length) return;
+    const requestId = ++dragRerankRequestRef.current;
+    const requestTestId = session.testId;
+    const requestCandidateId = candidate.id;
     setLoading(true);
     setError(null);
     try {
@@ -4220,6 +4680,10 @@ function App() {
         draggedNode: { id: payload.node.id, type: payload.node.type, tokenIndex: payload.node.tokenIndex },
         pairInterventions: matches.pairInterventions
       });
+      if (requestId !== dragRerankRequestRef.current) return;
+      if (!result.candidates.length) {
+        throw new Error("The rerank response did not include any candidates.");
+      }
       setCandidates(result.candidates);
       let generalized: Record<string, DragMatchBundle> = {};
       if (session.capabilities?.external_effects !== false) {
@@ -4243,16 +4707,16 @@ function App() {
       }));
       if (result.activeCandidate) setCandidate(result.activeCandidate);
       if (result.activeGraph) setGraph(result.activeGraph);
-      setActiveCandidateId(candidate.id);
+      setActiveCandidateId(requestCandidateId);
       Object.entries(result.updatedCandidates ?? {}).forEach(([candidateId, detail]) => {
-        candidateDetailCacheRef.current[payloadCacheKey(session.testId, candidateId)] = detail;
+        candidateDetailCacheRef.current[payloadCacheKey(requestTestId, candidateId)] = detail;
       });
       Object.entries(result.updatedGraphs ?? {}).forEach(([candidateId, nextGraph]) => {
-        graphCacheRef.current[payloadCacheKey(session.testId, candidateId)] = nextGraph;
+        graphCacheRef.current[payloadCacheKey(requestTestId, candidateId)] = nextGraph;
       });
       logEvent("projection_drag_drop", {
         testId: session.testId,
-        candidateId: candidate.id,
+        candidateId: requestCandidateId,
         nodeId: payload.node.id,
         nodeType: payload.node.type,
         affectedNodes: payload.updates.length,
@@ -4260,9 +4724,10 @@ function App() {
         source: result.diagnostic.source
       });
     } catch (err) {
+      if (requestId !== dragRerankRequestRef.current) return;
       setError(isUnavailableTokenError(err) ? null : err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (requestId === dragRerankRequestRef.current) setLoading(false);
     }
   }
 
@@ -4415,6 +4880,8 @@ function App() {
   }
 
   function changeParticipant() {
+    const confirmed = window.confirm("Change participant? The current participant session and task progress will be ended.");
+    if (!confirmed) return;
     if (studySession) logEvent("session_end", { participantId: studySession.participantId });
     window.sessionStorage.removeItem(`irag-study-session-${appMode}`);
     setEventContext({});
@@ -4483,32 +4950,19 @@ function App() {
   }
 
   function handleHierarchyLine(lineNumber: number) {
-    selectLine(lineNumber);
-    setSelectedLines([lineNumber]);
-    setLineTokenScope(lineNumber);
+    void lineNumber;
   }
 
   function handleHierarchyBlock(blockId: string) {
-    setSelectedBlockId(blockId);
-    setSelectedLines([]);
-    setSelectedTokenIds([]);
-    setLineTokenScope(null);
+    void blockId;
   }
 
   function handleCanvasLevel(level: CanvasLevel) {
-    if (level === "line_tokens") {
-      setSelectedLines([]);
-      setSelectedTokenIds([]);
-      setSelectedConcepts([]);
-    }
-    setCanvasLevel(level);
+    void level;
+    setCanvasLevel("token");
   }
 
   function handleCodeViewerLine(lineNumber: number) {
-    if (canvasLevel === "line" || canvasLevel === "line_tokens") {
-      handleHierarchyLine(lineNumber);
-      return;
-    }
     selectLine(lineNumber);
   }
 
@@ -4535,7 +4989,7 @@ function App() {
     setSelectedManualLinkId(null);
     setSelectedDragMatchKey(null);
     setSelectedConcepts([]);
-    if (canvasLevel !== "line_tokens") setLineTokenScope(null);
+    setLineTokenScope(null);
     setManualLinks([]);
     setManualLinkStore({});
       setDragMatchesByCandidate({});
@@ -4684,7 +5138,7 @@ function App() {
             <option value="">Select an example</option>
             {tests.map((id) => (
               <option key={id} value={id}>
-              {id === "48" ? "48 · allowed extension alignment" : id === "1556" ? "1556 · reset system state" : id === "1642" ? "1642 · compact rerank demo" : id === "2695" ? "2695 · EM iteration" : id === "2797" ? "2797 · command-line argument recovery" : id === "2836" ? "2836 · parent override logging recovery" : id === "3856" ? "3856 · comparable dictionary" : id === "954" ? "954 · API decorator specificity" : id === "csn_9848" ? "9848 · configuration return type" : id === "csn_11087" ? "11087 · right-click position" : id === "csn_11078" ? "11078 · error message display" : id === "csn_9406" ? "9406 · device buffer write" : id === "csn_400" ? "400 · parse options and commands" : id === "csn_13958" ? "13958 · line-pair diagnosis" : id === "csn_13527" ? "13527 · command-line logging" : id === "csn_8838" ? "8838 · interned keyword API bridge" : id === "csn_11772" ? "11772 · asset MIME-type extension bridge" : id === "csn_584" ? "584 · random perspective parameters" : id === "csn_2812" ? "2812 · qubit dimension log2 bridge" : id === "csn_7727" ? "7727 · Stokes calibration feed-type bridge" : id === "csn_4772" ? "4772 · KMIP DeviceCredential serialization bridge" : id === "csn_10023" ? "10023 · OSM replication state bridge" : id === "csn_2207" ? "2207 · window sum-square hop-length bridge" : id === "csn_5340" ? "5340 · GeoTiff VLR API bridge" : id === "csn_10164" ? "10164 · V4 meter request bridge" : id === "csn_13655" ? "13655 · application logging bridge" : id === "csn_14175" ? "14175 · notebook format bridge" : id === "csn_10643" ? "10643 · root logger bridge" : id === "csn_12075" ? "12075 · current tags API bridge" : `test ${id}`}
+              {id === "48" ? "48 · allowed extension alignment" : id === "1556" ? "1556 · reset system state" : id === "1642" ? "1642 · compact rerank demo" : id === "2695" ? "2695 · EM iteration" : id === "2797" ? "2797 · command-line argument recovery" : id === "2836" ? "2836 · parent override logging recovery" : id === "3856" ? "3856 · comparable dictionary" : id === "954" ? "954 · API decorator specificity" : id === "csn_9848" ? "9848 · configuration return type" : id === "csn_11087" ? "11087 · right-click position" : id === "csn_11078" ? "11078 · error message display" : id === "csn_9406" ? "9406 · device buffer write" : id === "csn_400" ? "400 · parse options and commands" : id === "csn_13958" ? "13958 · line-pair diagnosis" : id === "csn_13527" ? "13527 · command-line logging" : id === "csn_8838" ? "8838 · interned keyword API bridge" : id === "csn_11772" ? "11772 · asset MIME-type extension bridge" : id === "csn_9388" ? "9388 · URL query removal" : id === "csn_8884" ? "8884 · Try AST dead-code cleanup" : id === "csn_3846" ? "3846 · decorator redefinition" : id === "csn_42" ? "42 · Cloud SQL delete completion" : id === "csn_12226" ? "12226 · alarm API result handling" : id === "csn_584" ? "584 · random perspective parameters" : id === "csn_2812" ? "2812 · qubit dimension log2 bridge" : id === "csn_7727" ? "7727 · Stokes calibration feed-type bridge" : id === "csn_4772" ? "4772 · KMIP DeviceCredential serialization bridge" : id === "csn_10023" ? "10023 · OSM replication state bridge" : id === "csn_2207" ? "2207 · window sum-square hop-length bridge" : id === "csn_5340" ? "5340 · GeoTiff VLR API bridge" : id === "csn_10164" ? "10164 · V4 meter request bridge" : id === "csn_13655" ? "13655 · application logging bridge" : id === "csn_14175" ? "14175 · notebook format bridge" : id === "csn_10643" ? "10643 · root logger bridge" : id === "csn_12075" ? "12075 · current tags API bridge" : `test ${id}`}
               </option>
             ))}
           </select>
@@ -4824,15 +5278,6 @@ function App() {
           ) : (
             <>
               <BaselineCodeViewer candidate={candidate} displaySimilarity={currentCandidateSummary?.similarity} />
-              <CandidatePanel
-                candidates={candidates.length ? candidates : session?.candidates ?? []}
-                selectedId={activeCandidateId}
-                onSelect={selectCandidate}
-                modelId={modelId}
-                showGroundTruth={false}
-                adjudicationIds={[]}
-                onAdjudicationToggle={() => undefined}
-              />
             </>
           )) : <>
           {adjudicationMode && session ? (
@@ -4854,6 +5299,7 @@ function App() {
                   summaries={Object.fromEntries((candidates.length ? candidates : session.candidates).map((item) => [item.id, item]))}
                   showGroundTruth={isDemo}
                   showEvidence
+                  showUncoveredEvidence={isDemo}
                   choosingReference={generationLoading}
                   onChooseReference={(selectedCandidate) => void confirmReferenceForGeneration(selectedCandidate)}
                 />
@@ -4862,7 +5308,11 @@ function App() {
               )}
             </div>
           ) : <>
-          <div className={`focus-panes ${focusPaneOrder}`}>
+          <div
+            ref={focusPanesRef}
+            className={`focus-panes ${focusPaneOrder}${resizingFocusPanes ? " resizing" : ""}`}
+            style={{ "--code-pane-width": `${codePaneWidth}px` } as React.CSSProperties}
+          >
             {focusPaneOrder === "graph-first" ? (
               <>
                 <VisualizationCanvas
@@ -4911,11 +5361,45 @@ function App() {
                   }}
                   externalImpacts={currentExternalImpacts}
                 />
+                <div
+                  className="pane-resize-handle"
+                  role="separator"
+                  aria-label="Resize Code Viewer and Embedding Space"
+                  aria-orientation="vertical"
+                  aria-valuemin={280}
+                  aria-valuenow={Math.round(codePaneWidth)}
+                  tabIndex={0}
+                  onPointerDown={beginFocusPaneResize}
+                  onPointerMove={moveFocusPaneResize}
+                  onPointerUp={endFocusPaneResize}
+                  onPointerCancel={endFocusPaneResize}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowLeft") { event.preventDefault(); adjustCodePaneWidth(-32); }
+                    if (event.key === "ArrowRight") { event.preventDefault(); adjustCodePaneWidth(32); }
+                  }}
+                />
                 <CodeViewer candidate={candidate} session={session} graph={graph} canvasLevel={canvasLevel} selectedBlockId={selectedBlockId} displaySimilarity={currentCandidateSummary?.similarity} selectedConcepts={selectedConcepts} selectedLines={selectedLines} selectedTokenIds={selectedTokenIds} manualLinks={manualLinks} dragTokenMatches={currentDragMatches.tokenMatches} dragLineMatches={currentDragMatches.lineMatches} onBlock={handleHierarchyBlock} onLine={handleCodeViewerLine} onToken={selectTokenId} />
               </>
             ) : (
               <>
                 <CodeViewer candidate={candidate} session={session} graph={graph} canvasLevel={canvasLevel} selectedBlockId={selectedBlockId} displaySimilarity={currentCandidateSummary?.similarity} selectedConcepts={selectedConcepts} selectedLines={selectedLines} selectedTokenIds={selectedTokenIds} manualLinks={manualLinks} dragTokenMatches={currentDragMatches.tokenMatches} dragLineMatches={currentDragMatches.lineMatches} onBlock={handleHierarchyBlock} onLine={handleCodeViewerLine} onToken={selectTokenId} />
+                <div
+                  className="pane-resize-handle"
+                  role="separator"
+                  aria-label="Resize Code Viewer and Embedding Space"
+                  aria-orientation="vertical"
+                  aria-valuemin={280}
+                  aria-valuenow={Math.round(codePaneWidth)}
+                  tabIndex={0}
+                  onPointerDown={beginFocusPaneResize}
+                  onPointerMove={moveFocusPaneResize}
+                  onPointerUp={endFocusPaneResize}
+                  onPointerCancel={endFocusPaneResize}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowLeft") { event.preventDefault(); adjustCodePaneWidth(-32); }
+                    if (event.key === "ArrowRight") { event.preventDefault(); adjustCodePaneWidth(32); }
+                  }}
+                />
                 <VisualizationCanvas
                   candidate={candidate}
                   session={session}
@@ -4965,6 +5449,11 @@ function App() {
               </>
             )}
           </div>
+          </>}
+          </>
+          )}
+        </div>
+        {!generationMode && !adjudicationMode ? (
           <CandidatePanel
             candidates={candidates.length ? candidates : session?.candidates ?? []}
             selectedId={activeCandidateId}
@@ -4974,10 +5463,7 @@ function App() {
             adjudicationIds={adjudicationIds}
             onAdjudicationToggle={toggleAdjudicationCandidate}
           />
-          </>}
-          </>
-          )}
-        </div>
+        ) : null}
       </div>
     </div>
   );

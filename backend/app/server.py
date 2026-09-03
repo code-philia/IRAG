@@ -18,6 +18,7 @@ from .intervention_service import (
     has_active_interventions,
     apply_manual_link,
     reset_interventions,
+    _csn_gt_prefix_cache,
 )
 from .generation_service import confirm_reference, finalize_reference, get_confirmed_generation_task, get_generation_comparison, get_reference_hint, has_generation_task, generate_code, evaluate_generation
 from .log_service import append_event, store_study_session
@@ -35,10 +36,19 @@ def _generic_service():
     return generic_dual_encoder_service
 
 
-BOOTSTRAP_PREWARM_TEST_IDS = ("csn_11078", "csn_11087", "csn_11772", "csn_584")
+BOOTSTRAP_PREWARM_TEST_IDS = (
+    "csn_11772",
+    "csn_8884",
+    "csn_3846",
+    "csn_42",
+    "csn_9388",
+)
 STUDY_STATIC_BUNDLE_READY: dict[str, threading.Event] = {
     "csn_11772": threading.Event(),
-    "csn_584": threading.Event(),
+    "csn_8884": threading.Event(),
+    "csn_3846": threading.Event(),
+    "csn_42": threading.Event(),
+    "csn_9388": threading.Event(),
 }
 
 
@@ -61,16 +71,28 @@ def _cached_static_candidate_graph(test_id: str, candidate_id: str) -> dict:
     return build_dynavis_graph(test_id, candidate_id, candidate=candidate)
 
 
-@lru_cache(maxsize=2)
+@lru_cache(maxsize=8)
 def _cached_static_candidate_bundle(test_id: str, top_k: int) -> dict:
     """A browser-ready cache for the small, fixed study candidate set."""
     session = build_session_payload(test_id, top_k)
     candidates: dict[str, dict] = {}
     graphs: dict[str, dict] = {}
-    for item in session.get("candidates", []):
-        candidate_id = str(item["id"])
-        candidates[candidate_id] = build_candidate_payload(test_id, candidate_id)
-        graphs[candidate_id] = _cached_static_candidate_graph(test_id, candidate_id)
+    candidate_ids = {str(item["id"]) for item in session.get("candidates", [])}
+    # Drag reranking can surface a candidate from the cached prefix scope that
+    # was outside the initial visible list. Prewarm those same candidates so a
+    # post-drag switch is as fast as an ordinary candidate switch.
+    if test_id in {"csn_3846", "csn_8884"}:
+        prefix = _csn_gt_prefix_cache().get(test_id) or {}
+        for code_index in prefix.get("indices", []).tolist() if hasattr(prefix.get("indices"), "tolist") else []:
+            candidate_id = f"code_{1_000_000 + int(code_index)}"
+            if not is_hidden_reference_candidate(test_id, candidate_id):
+                candidate_ids.add(candidate_id)
+    for candidate_id in sorted(candidate_ids):
+        try:
+            candidates[candidate_id] = build_candidate_payload(test_id, candidate_id)
+            graphs[candidate_id] = _cached_static_candidate_graph(test_id, candidate_id)
+        except ValueError as exc:
+            print(f"Static candidate preload skipped for {test_id} {candidate_id}: {exc}")
     return {"candidates": candidates, "graphs": graphs}
 
 
@@ -92,8 +114,6 @@ def _prewarm_bootstrap_cache() -> None:
         try:
             bootstrap = _cached_initial_bootstrap(test_id, 20)
             if test_id in STUDY_STATIC_BUNDLE_READY:
-                for candidate in bootstrap["session"].get("candidates", []):
-                    _cached_static_candidate_graph(test_id, str(candidate["id"]))
                 _cached_static_candidate_bundle(test_id, 20)
                 STUDY_STATIC_BUNDLE_READY[test_id].set()
         except Exception as exc:

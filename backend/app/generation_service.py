@@ -51,12 +51,36 @@ GENERATION_TASK_OVERRIDES: dict[str, dict[str, str]] = {
         "functionSignature": "def get_params(width, height, distortion_scale):",
         "generationInstruction": "Implement only this function. Return startpoints and endpoints for a random perspective transform.",
     },
+    "csn_8884": {
+        "functionSignature": "def visit_Try(self, node):",
+        "generationInstruction": "Implement only this method. Return an optimized Try AST node or None. Use direct public AST attribute access; do not use getattr or dynamic attribute lookup.",
+    },
+    "csn_3846": {
+        "functionSignature": "def redefined_by_decorator(node):",
+        "generationInstruction": "Implement only this function.",
+    },
+    "csn_12226": {
+        "functionSignature": "def _handle_results(self):",
+        "generationInstruction": "Implement only this method. Use the command's existing response object and terminal-formatting conventions.",
+    },
+    "csn_42": {
+        "functionSignature": "def delete_database(self, instance, database, project_id=None):",
+        "generationInstruction": "Implement only this method. Use the hook's existing Cloud SQL connection and asynchronous operation conventions.",
+    },
+    "csn_9388": {
+        "functionSignature": "def url_dequery(url):",
+        "generationInstruction": "Implement only this function. Return the same URL with its query parameters removed while preserving the other URL components.",
+    },
 }
 
 CSN_11772_RANK_ONE_CODE_IDX = 1_029_389
 CSN_11772_TARGET_REFERENCE_CODE_IDX = 1_001_612
 CSN_584_RANK_ONE_CODE_IDX = 1_024_026
 CSN_584_TARGET_REFERENCE_CODE_IDX = 1_004_381
+CSN_8884_RANK_ONE_CODE_IDX = 1_012_324
+CSN_8884_TARGET_REFERENCE_CODE_IDX = 1_037_136
+CSN_3846_RANK_ONE_CODE_IDX = 1_023_534
+CSN_3846_TARGET_REFERENCE_CODE_IDX = 1_033_231
 CSN_11772_CURATED_GENERATIONS: dict[str, str] = {
     "no_reference": '''def compiler_format_extension(self):
     compiler_mimetype = getattr(self, "compiler_mimetype", None)
@@ -194,6 +218,54 @@ CSN_584_CURATED_GENERATIONS: dict[str, str] = {
 ''',
 }
 
+CSN_8884_CURATED_GENERATIONS: dict[str, str] = {
+    "rank1_reference": '''def visit_Try(self, node):
+    new_node = self.generic_visit(node)
+    assert isinstance(new_node, ast.Try)
+    return ast.Try(
+        body=_filter_dead_code(new_node.body),
+        handlers=new_node.handlers,
+        orelse=_filter_dead_code(new_node.orelse),
+        finalbody=new_node.finalbody,
+    )
+''',
+    "target_reference": '''def visit_Try(self, node):
+    new_node = self.generic_visit(node)
+    assert isinstance(new_node, ast.Try)
+    return ast.copy_location(
+        ast.Try(
+            body=_filter_dead_code(new_node.body),
+            handlers=new_node.handlers,
+            orelse=_filter_dead_code(new_node.orelse),
+            finalbody=_filter_dead_code(new_node.finalbody),
+        ),
+        new_node,
+    )
+''',
+}
+
+CSN_3846_CURATED_GENERATIONS: dict[str, str] = {
+    "rank1_reference": '''def redefined_by_decorator(node):
+    decorators = node.decorators.nodes if node.decorators else []
+
+    for decorator in decorators:
+        if getattr(decorator, "name", None) == node.name:
+            return True
+
+    return False
+''',
+    "target_reference": '''def redefined_by_decorator(node):
+    if node.decorators:
+        for decorator in node.decorators.nodes:
+            if (
+                isinstance(decorator, astroid.Attribute)
+                and getattr(decorator.expr, "name", None) == node.name
+            ):
+                return True
+    return False
+''',
+}
+
 # Hidden tests are evaluation-only.  The generator receives the same query the
 # participant used for reference selection, plus exactly one selected code.
 HIDDEN_EVALUATIONS: dict[str, dict[str, Any]] = {
@@ -216,6 +288,10 @@ assert (cache[7].name, cache[7].ns) == ("name", "ns")
     },
     "csn_11772": {"testFile": "csn_11772.py"},
     "csn_584": {"testFile": "csn_584.py"},
+    "csn_8884": {"testFile": "csn_8884.py"},
+    "csn_3846": {"testFile": "csn_3846.py"},
+    "csn_42": {"testFile": "csn_42.py"},
+    "csn_9388": {"testFile": "csn_9388.py"},
 }
 
 
@@ -269,7 +345,12 @@ def confirm_reference(payload: dict[str, Any]) -> dict[str, Any]:
     if not selected_candidate_id:
         raise ValueError("selectedCandidateId is required.")
     task = _public_task(case_id)
-    session = build_session_payload(case_id, top_k=20)
+    # A drag can promote an initially out-of-view reference into the current
+    # participant-visible ranking. Validate against that same representation,
+    # rather than the pristine Top-20 used when the session first loaded.
+    from .intervention_service import apply_adapter_to_session_payload
+
+    session = apply_adapter_to_session_payload(build_session_payload(case_id, top_k=20))
     visible_ids = {str(item["id"]) for item in session.get("candidates", [])}
     if selected_candidate_id not in visible_ids or is_hidden_reference_candidate(case_id, selected_candidate_id):
         raise ValueError("The selected candidate is not an available reference for this case.")
@@ -396,6 +477,16 @@ def _curated_generation(case_id: str, condition: str, context: dict[str, Any] | 
             return "rank1_reference", CSN_584_CURATED_GENERATIONS["rank1_reference"]
         if code_idx == CSN_584_TARGET_REFERENCE_CODE_IDX:
             return "target_reference", CSN_584_CURATED_GENERATIONS["target_reference"]
+    if case_id == "csn_8884":
+        if condition == "automatic_rag" or code_idx == CSN_8884_RANK_ONE_CODE_IDX:
+            return "rank1_reference", CSN_8884_CURATED_GENERATIONS["rank1_reference"]
+        if code_idx == CSN_8884_TARGET_REFERENCE_CODE_IDX:
+            return "target_reference", CSN_8884_CURATED_GENERATIONS["target_reference"]
+    if case_id == "csn_3846":
+        if condition == "automatic_rag" or code_idx == CSN_3846_RANK_ONE_CODE_IDX:
+            return "rank1_reference", CSN_3846_CURATED_GENERATIONS["rank1_reference"]
+        if code_idx == CSN_3846_TARGET_REFERENCE_CODE_IDX:
+            return "target_reference", CSN_3846_CURATED_GENERATIONS["target_reference"]
     return None
 
 
@@ -444,7 +535,18 @@ def _call_completion(prompt: str, system_prompt: str) -> str:
             if attempt < 2:
                 time.sleep(attempt + 1)
         except HTTPError as exc:
-            raise RuntimeError(f"generator_unavailable: provider returned HTTP {exc.code}.") from exc
+            response_body = exc.read().decode("utf-8", errors="replace").strip()
+            detail = " ".join(response_body.split())[:300]
+            try:
+                error_payload = json.loads(response_body).get("error")
+                if isinstance(error_payload, dict):
+                    detail = str(error_payload.get("message") or error_payload.get("code") or detail)
+                elif error_payload:
+                    detail = str(error_payload)
+            except (AttributeError, json.JSONDecodeError):
+                pass
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(f"generator_unavailable: provider returned HTTP {exc.code}{suffix}") from exc
         except URLError as exc:
             raise RuntimeError(f"generator_unavailable: provider request failed: {exc.reason}") from exc
     raise RuntimeError("generator_unavailable: provider returned empty code content after three attempts.") from last_empty_response
@@ -646,8 +748,8 @@ def _validate_generated_function(generated_code: str) -> None:
             raise ValueError("Generated code uses a construct that is not permitted by the evaluator.")
         if isinstance(node, ast.Name) and (node.id in forbidden_names or node.id.startswith("__")):
             raise ValueError("Generated code uses an API that is not permitted by the evaluator.")
-        if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
-            raise ValueError("Generated code accesses a private attribute, which is not permitted by the evaluator.")
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            raise ValueError("Generated code accesses a dunder attribute, which is not permitted by the evaluator.")
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "getattr":
             if len(node.args) not in {2, 3} or not isinstance(node.args[1], ast.Constant) or not isinstance(node.args[1].value, str) or node.args[1].value.startswith("_"):
                 raise ValueError("Generated code uses getattr outside the evaluator's permitted attribute-access pattern.")
@@ -745,7 +847,17 @@ def evaluate_generation(payload: dict[str, Any]) -> dict[str, Any]:
         evaluation_record = {"id": f"evaluation_{uuid.uuid4().hex}", "kind": "evaluation", "createdAt": time.time(), "caseId": record["caseId"], "condition": record["condition"], "selectionId": record.get("selectionId"), "sessionId": record.get("sessionId", ""), "participantId": record.get("participantId", ""), "caseAttemptId": record.get("caseAttemptId", ""), **result}
         _write_record(GENERATION_RECORDS_DIR, evaluation_record)
         return result
-    test_result = _run_hidden_tests(str(record["generatedCode"]), evaluation)
+    try:
+        test_result = _run_hidden_tests(str(record["generatedCode"]), evaluation)
+    except ValueError as exc:
+        test_result = {
+            "testsPassed": 0,
+            "testsTotal": 1,
+            "testResults": [{"name": "generated_function_validation", "passed": False, "error": str(exc)}],
+            "fullSuccess": False,
+            "stdout": "",
+            "stderr": "",
+        }
     result = {
         "status": "ok",
         "generationId": generation_id,
