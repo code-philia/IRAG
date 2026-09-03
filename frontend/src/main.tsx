@@ -34,6 +34,7 @@ const APP_MODE: AppMode = window.location.pathname.startsWith("/baseline")
       : "demo";
 const FOCUS_TEST_IDS = [DEFAULT_TEST_ID, "48", "1556", "1642", "2695", "3856", "954", "csn_9848", "csn_11087", "csn_11078", "csn_9406", "csn_400", "csn_13958", "csn_13527", "csn_8838", "csn_7664", "csn_2613", "csn_12213", "csn_11772", "csn_9388", "csn_2812", "csn_7727", "csn_4772", "csn_10023", "csn_2207", "csn_5340", "csn_10164", "csn_13655", "csn_14175", "csn_10643", "csn_12075"];
 const GENERATION_CASE_IDS = new Set(["csn_8838", "csn_7664", "csn_2613", "csn_12213", "csn_11772", "csn_8884", "csn_3846", "csn_42", "csn_9388"]);
+const AUTO_TOKEN_SUGGESTIONS_ENABLED = false;
 const GRAPH_WIDTH = 880;
 const GRAPH_HEIGHT = 560;
 const SUPPORT_QUERY_EVIDENCE_THRESHOLD = 0.55;
@@ -1890,7 +1891,10 @@ function CodeViewer({
   const conceptList = session?.query.concepts ?? [];
   const blockWinners = useMemo(() => conceptWinnerMap(hierarchyBlocks, conceptList), [graph?.hierarchy?.blocks, session?.query.concepts]);
   const allHierarchyLines = useMemo(() => Object.values(graph?.hierarchy?.linesByBlock ?? {}).flat().map((line) => ({ ...line, id: `line_${line.lineNumber}` })), [graph?.hierarchy?.linesByBlock]);
-  const recommendedTokenIndices = useMemo(() => new Set(graph?.hierarchy?.recommendedTokenIndices ?? []), [graph?.hierarchy?.recommendedTokenIndices]);
+  const recommendedTokenIndices = useMemo(
+    () => AUTO_TOKEN_SUGGESTIONS_ENABLED ? new Set(graph?.hierarchy?.recommendedTokenIndices ?? []) : new Set<number>(),
+    [graph?.hierarchy?.recommendedTokenIndices]
+  );
   const conceptById = useMemo(() => new Map(conceptList.map((concept) => [concept.conceptId, concept])), [conceptList]);
   const selectedBlockHierarchyLines = useMemo(() => {
     if (!selectedBlockId) return [];
@@ -2103,11 +2107,9 @@ function VisualizationCanvas({
   onHierarchyLine: (lineNumber: number) => void;
   onHierarchyConcept: (conceptId: number) => void;
 }) {
-  const [showRecommendedTokens, setShowRecommendedTokens] = useState(false);
-  useEffect(() => {
-    setShowRecommendedTokens(false);
-  }, [tokenProps.candidate?.id]);
-  const recommendedTokenIndices = new Set(tokenProps.graph?.hierarchy?.recommendedTokenIndices ?? []);
+  const recommendedTokenIndices = AUTO_TOKEN_SUGGESTIONS_ENABLED
+    ? new Set(tokenProps.graph?.hierarchy?.recommendedTokenIndices ?? [])
+    : new Set<number>();
   const dragLinkedTokenIndices = (() => {
     if (!tokenProps.graph) return new Set<number>();
     const draggedSeeds = tokenProps.graph.nodes.filter((node) => {
@@ -2143,15 +2145,15 @@ function VisualizationCanvas({
         canvasScope="all"
         queryPointMode={queryPointMode}
         onQueryConcept={onHierarchyConcept}
-        showRecommendedTokens={showRecommendedTokens}
+        showRecommendedTokens={false}
         linkedSuggestionTokenIndices={dragLinkedTokenIndices}
         nodeColorOverrides={{}}
         headerControls={<div className="token-level-switch hierarchy-breadcrumb">
-        {recommendedTokenIndices.size ? (
+        {AUTO_TOKEN_SUGGESTIONS_ENABLED && recommendedTokenIndices.size ? (
           <button
             type="button"
-            className={showRecommendedTokens ? "hierarchy-open active" : "hierarchy-open"}
-            onClick={() => setShowRecommendedTokens((current) => !current)}
+            className="hierarchy-open"
+            onClick={() => undefined}
           >
             Suggestions
           </button>

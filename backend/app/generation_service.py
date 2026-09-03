@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import uuid
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -27,6 +28,7 @@ from .config import (
     GENERATION_RECORDS_DIR,
     GENERATION_RESULTS_DIR,
     GENERATION_TEMPERATURE,
+    CURATED_GENERATION_MATRIX_PATH,
 )
 from .data_service import (
     SINGLE_REFERENCE_CASE_CONFIG,
@@ -81,6 +83,10 @@ CSN_8884_RANK_ONE_CODE_IDX = 1_012_324
 CSN_8884_TARGET_REFERENCE_CODE_IDX = 1_037_136
 CSN_3846_RANK_ONE_CODE_IDX = 1_023_534
 CSN_3846_TARGET_REFERENCE_CODE_IDX = 1_033_231
+CSN_42_RANK_ONE_CODE_IDX = 1_016_745
+CSN_42_TARGET_REFERENCE_CODE_IDX = 1_006_706
+CSN_9388_RANK_ONE_CODE_IDX = 1_012_695
+CSN_9388_TARGET_REFERENCE_CODE_IDX = 1_007_230
 CSN_11772_CURATED_GENERATIONS: dict[str, str] = {
     "no_reference": '''def compiler_format_extension(self):
     compiler_mimetype = getattr(self, "compiler_mimetype", None)
@@ -265,6 +271,95 @@ CSN_3846_CURATED_GENERATIONS: dict[str, str] = {
     return False
 ''',
 }
+
+CSN_42_CURATED_GENERATIONS: dict[str, str] = {
+    "rank1_reference": '''def delete_database(self, instance, database, project_id=None):
+    with self.get_conn() as conn:
+        conn.execute('DROP DATABASE IF EXISTS %s' % database)
+''',
+    "target_reference": '''def delete_database(self, instance, database, project_id=None):
+    response = self.get_conn().databases().delete(
+        project=project_id,
+        instance=instance,
+        database=database,
+    ).execute(num_retries=self.num_retries)
+    operation_name = response['name']
+    self._wait_for_operation_to_complete(
+        project_id=project_id,
+        operation_name=operation_name,
+    )
+''',
+}
+
+CSN_9388_CURATED_GENERATIONS: dict[str, str] = {
+    "rank1_reference": '''def url_dequery(url):
+    if '?' not in url:
+        return url
+    return url.split('?', 1)[0]
+''',
+    "target_reference": '''def url_dequery(url):
+    parsed = urlparse.urlparse(url)
+    return urlparse.urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        '',
+        parsed.fragment,
+    ))
+''',
+}
+
+CURATED_REPLACEMENT_GENERATIONS: dict[str, dict[int, str]] = {
+    "csn_8884": {
+        1_000_139: '''def visit_Try(self, node):
+    self.generic_visit(node)
+    return node
+''',
+    },
+    "csn_9388": {
+        1_028_080: '''def url_dequery(url):
+    return url
+''',
+    },
+}
+
+CURATED_FALLBACK_GENERATIONS: dict[str, str] = {
+    "csn_11772": CSN_11772_CURATED_GENERATIONS["no_reference"],
+    "csn_8884": '''def visit_Try(self, node):
+    self.generic_visit(node)
+    return node
+''',
+    "csn_3846": '''def redefined_by_decorator(node):
+    return False
+''',
+    "csn_42": '''def delete_database(self, instance, database, project_id=None):
+    return None
+''',
+    "csn_9388": '''def url_dequery(url):
+    return url
+''',
+}
+
+
+@lru_cache(maxsize=1)
+def _curated_generation_matrix() -> dict[str, dict[int, dict[str, Any]]]:
+    """Load fixed reference-conditioned outputs for the active study cases."""
+    if not CURATED_GENERATION_MATRIX_PATH.exists():
+        return {}
+    try:
+        raw = json.loads(CURATED_GENERATION_MATRIX_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {
+        str(case_id): {
+            int(str(item.get("id", "code_-1")).replace("code_", "")): item
+            for item in items
+            if isinstance(item, dict) and str(item.get("id", "")).startswith("code_")
+        }
+        for case_id, items in raw.items()
+        if isinstance(items, list)
+    }
 
 # Hidden tests are evaluation-only.  The generator receives the same query the
 # participant used for reference selection, plus exactly one selected code.
@@ -465,6 +560,12 @@ def _generation_prompt(task: dict[str, Any], context: dict[str, Any] | None) -> 
 def _curated_generation(case_id: str, condition: str, context: dict[str, Any] | None) -> tuple[str, str] | None:
     """Return representative pre-evaluated generations for configured demos."""
     code_idx = int(context.get("codeIdx", -1)) if context else -1
+    replacement = CURATED_REPLACEMENT_GENERATIONS.get(case_id, {}).get(code_idx)
+    if replacement:
+        return "replacement_reference", replacement
+    matrix_item = _curated_generation_matrix().get(case_id, {}).get(code_idx)
+    if matrix_item:
+        return f"rank_{int(matrix_item.get('rank', 0))}_reference", str(matrix_item["generated_code"])
     if case_id == "csn_11772":
         if condition == "no_rag":
             return "no_reference", CSN_11772_CURATED_GENERATIONS["no_reference"]
@@ -487,6 +588,19 @@ def _curated_generation(case_id: str, condition: str, context: dict[str, Any] | 
             return "rank1_reference", CSN_3846_CURATED_GENERATIONS["rank1_reference"]
         if code_idx == CSN_3846_TARGET_REFERENCE_CODE_IDX:
             return "target_reference", CSN_3846_CURATED_GENERATIONS["target_reference"]
+    if case_id == "csn_42":
+        if condition == "automatic_rag" or code_idx == CSN_42_RANK_ONE_CODE_IDX:
+            return "rank1_reference", CSN_42_CURATED_GENERATIONS["rank1_reference"]
+        if code_idx == CSN_42_TARGET_REFERENCE_CODE_IDX:
+            return "target_reference", CSN_42_CURATED_GENERATIONS["target_reference"]
+    if case_id == "csn_9388":
+        if condition == "automatic_rag" or code_idx == CSN_9388_RANK_ONE_CODE_IDX:
+            return "rank1_reference", CSN_9388_CURATED_GENERATIONS["rank1_reference"]
+        if code_idx == CSN_9388_TARGET_REFERENCE_CODE_IDX:
+            return "target_reference", CSN_9388_CURATED_GENERATIONS["target_reference"]
+    fallback = CURATED_FALLBACK_GENERATIONS.get(case_id)
+    if fallback:
+        return "fixed_fallback", fallback
     return None
 
 

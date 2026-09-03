@@ -131,9 +131,101 @@ def sample():
     assert len(result.finalbody) == 1
 
 
+def test_removes_dead_code_after_break_in_try_body():
+    node = _try_node(
+        """
+def sample():
+    while True:
+        try:
+            work()
+            break
+            dead()
+        except Exception:
+            recover()
+"""
+    )
+
+    result = visit_Try(_OptimizerContext(), node)
+
+    assert isinstance(result.body[-1], ast.Break)
+    assert not _has_call(result.body, "dead")
+
+
+def test_removes_dead_code_after_continue_in_try_body():
+    node = _try_node(
+        """
+def sample():
+    while True:
+        try:
+            work()
+            continue
+            dead()
+        except Exception:
+            recover()
+"""
+    )
+
+    result = visit_Try(_OptimizerContext(), node)
+
+    assert isinstance(result.body[-1], ast.Continue)
+    assert not _has_call(result.body, "dead")
+
+
+def test_preserves_reachable_handler_body():
+    node = _try_node(
+        """
+def sample():
+    try:
+        work()
+    except ValueError:
+        first()
+        second()
+"""
+    )
+
+    result = visit_Try(_OptimizerContext(), node)
+
+    calls = [
+        statement.value.func.id
+        for statement in result.handlers[0].body
+        if isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Name)
+    ]
+
+    assert calls == ["first", "second"]
+
+
+def test_rebuilds_try_without_mutating_original_body():
+    """Repository-structural contract: visit_Try returns a rebuilt Try node."""
+    node = _try_node(
+        """
+def sample():
+    try:
+        work()
+        return 1
+        dead()
+    except Exception:
+        recover()
+"""
+    )
+
+    original_body = list(node.body)
+    result = visit_Try(_OptimizerContext(), node)
+
+    assert result is not node
+    assert node.body == original_body
+    assert len(result.body) == 2
+    assert isinstance(result.body[-1], ast.Return)
+
+
 TEST_CASES = [
     test_removes_dead_code_from_try_body,
     test_removes_dead_code_from_all_try_statement_regions,
     test_preserves_try_source_location,
     test_preserves_try_handlers_and_reachable_structure,
+    test_removes_dead_code_after_break_in_try_body,
+    test_removes_dead_code_after_continue_in_try_body,
+    test_preserves_reachable_handler_body,
+    test_rebuilds_try_without_mutating_original_body,
 ]

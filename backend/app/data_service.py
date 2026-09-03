@@ -523,7 +523,7 @@ CSN_RERANK_DEMO_TOP_ITEMS: dict[str, list[dict[str, Any]]] = {
         {"codeIdx": 7230, "score": 0.590000, "rank": 15},
         {"codeIdx": 42338, "score": 0.590000, "rank": 16},
         {"codeIdx": 18744, "score": 0.585000, "rank": 17},
-        {"codeIdx": 42916, "score": 0.580000, "rank": 18},
+        {"codeIdx": 28080, "score": 0.580000, "rank": 18},
         {"codeIdx": 25484, "score": 0.575000, "rank": 19},
         {"codeIdx": 16826, "score": 0.570000, "rank": 20},
     ],
@@ -1003,6 +1003,18 @@ def _display_concepts(test_id: str, query_concepts: list[dict[str, Any]]) -> lis
         for item in override
         if int(item["conceptId"]) in concepts_by_id
     ]
+
+
+def _replace_conflicting_study_candidate(test_id: str, item: dict[str, Any]) -> dict[str, Any]:
+    """Keep the fixed study rank while removing known full-pass alternatives."""
+    replacements = {
+        "csn_8884": (2345, 139),
+        "csn_9388": (42916, 28080),
+    }
+    old_index, new_index = replacements.get(str(test_id), (None, None))
+    if old_index is None or int(item.get("codeIdx", -1)) != old_index:
+        return item
+    return {**item, "codeIdx": new_index}
 
 
 def _use_legacy_rerank_demo(test_id: str) -> bool:
@@ -1634,6 +1646,7 @@ def _build_csn_demo_session(test_id: str, top_k: int = 5) -> dict[str, Any]:
     # GT. Fall back to the complete per-case ranking so the initial workspace
     # still contains the requested candidate set.
     ranked_items = full_prefix[:top_k] if len(full_prefix) >= top_k else _ranking_top_items(test_id, top_k)
+    ranked_items = [_replace_conflicting_study_candidate(test_id, item) for item in ranked_items]
     gt_idx = CSN_CODE_OFFSET + int(config["groundTruthCodeIdx"])
     candidates = []
     for item in ranked_items:
@@ -1913,7 +1926,7 @@ def build_session_payload(test_id: str, top_k: int = 10) -> dict[str, Any]:
 
     candidates = []
     if ranking:
-        ranked_items = _ranking_top_items(test_id, top_k)
+        ranked_items = [_replace_conflicting_study_candidate(test_id, item) for item in _ranking_top_items(test_id, top_k)]
         for item in ranked_items:
             code_idx = int(item["codeIdx"])
             row = get_row(code_idx)

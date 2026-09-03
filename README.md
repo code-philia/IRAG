@@ -31,8 +31,11 @@ The backend requires approved local XSearch/CSN data assets and environment
 paths before it can be started:
 
 ```bash
+python -m pip install astroid
 python backend/run_server.py
 ```
+
+The `astroid` dependency is required by the `csn_3846` generation test suite.
 
 The production deployment serves `frontend/dist` through Nginx and runs the
 Python API on `127.0.0.1:8765`.

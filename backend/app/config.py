@@ -54,6 +54,9 @@ STUDY_SESSION_DIR = STUDY_DIR / "sessions"
 GENERATION_DIR = ROOT_DIR / "data" / "generation"
 GENERATION_RECORDS_DIR = GENERATION_DIR / "records"
 GENERATION_RESULTS_DIR = GENERATION_DIR / "results"
+CURATED_GENERATION_MATRIX_PATH = Path(
+    os.environ.get("CURATED_GENERATION_MATRIX_PATH", ROOT_DIR / "data" / "irag_regenerated_illustrative_matrix.json")
+)
 GENERATION_PROVIDER = os.environ.get("GENERATION_PROVIDER", "openai_compatible")
 GENERATION_API_URL = os.environ.get("GENERATION_API_URL", "")
 GENERATION_API_KEY = os.environ.get("GENERATION_API_KEY", "")
