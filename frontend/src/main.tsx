@@ -40,9 +40,17 @@ const GRAPH_HEIGHT = 560;
 const SUPPORT_QUERY_EVIDENCE_THRESHOLD = 0.55;
 const CONFLICT_QUERY_EVIDENCE_THRESHOLD = 0.35;
 const CANDIDATE_PREFETCH_CONCURRENCY = 3;
+const MAX_DISPLAY_SIMILARITY = 0.95;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function safeDisplaySimilarity(value: number | null | undefined, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > -1e6
+    ? clamp(numeric, 0, MAX_DISPLAY_SIMILARITY)
+    : clamp(fallback, 0, MAX_DISPLAY_SIMILARITY);
 }
 
 function displayToken(token: string | number | null | undefined) {
@@ -916,14 +924,15 @@ function buildGeneralizedVisualMatches(details: Record<string, unknown> | undefi
       const concept = conceptsById.get(Number(match.conceptId));
       if (!concept) return;
       const original = originalByConcept.get(Number(match.conceptId));
-      const baseline = Number(original?.similarity ?? match.similarity);
-      const delta = Number(match.similarity) - baseline;
+      const baseline = safeDisplaySimilarity(Number(original?.similarity ?? match.similarity));
+      const similarity = safeDisplaySimilarity(Number(match.similarity), baseline);
+      const delta = similarity - baseline;
       if (Math.abs(delta) < 0.01) return;
       lineMatches.push({
         conceptId: Number(match.conceptId),
         lineNumber: Number(match.lineNumber),
         previousLineNumber: original?.lineNumber != null ? Number(original.lineNumber) : Number(match.lineNumber),
-        similarity: Number(match.similarity),
+        similarity,
         baseline,
         delta,
         color: concept.color,
@@ -933,15 +942,17 @@ function buildGeneralizedVisualMatches(details: Record<string, unknown> | undefi
     (item.tokenPairDeltas ?? []).forEach((pair) => {
       const concept = conceptsById.get(Number(pair.conceptId));
       if (!concept) return;
-      const delta = Number(pair.delta ?? 0);
+      const baseline = safeDisplaySimilarity(Number(pair.originalSimilarity));
+      const similarity = safeDisplaySimilarity(Number(pair.generalizedSimilarity), baseline);
+      const delta = similarity - baseline;
       if (Math.abs(delta) < 0.005) return;
       tokenMatches.push({
         queryTokenIndex: Number(pair.queryTokenIndex),
         codeTokenIndex: Number(pair.codeTokenIndex),
         queryToken: pair.queryToken,
         codeToken: pair.codeToken,
-        similarity: Number(pair.generalizedSimilarity),
-        baseline: Number(pair.originalSimilarity),
+        similarity,
+        baseline,
         delta,
         color: concept.color,
         newlyConnected: delta > 0,
@@ -1136,7 +1147,7 @@ function QueryPanel({
                         <strong>{displayQueryOriginal(lineText)}</strong>
                       </span>
                       <span className="drag-change-score">
-                        {match.baseline.toFixed(3)} -&gt; {match.similarity.toFixed(3)}
+                        {safeDisplaySimilarity(match.baseline).toFixed(3)} -&gt; {safeDisplaySimilarity(match.similarity, match.baseline).toFixed(3)}
                       </span>
                       <span className={delta >= 0 ? "drag-change-delta positive" : "drag-change-delta negative"}>
                         {delta >= 0 ? "+" : ""}{delta.toFixed(3)}
@@ -1169,8 +1180,8 @@ function QueryPanel({
                     <strong>{codeToken || `c${match.codeTokenIndex}`}</strong>
                   </span>
                   <span className="drag-change-score">
-                    {baseline != null ? `${baseline.toFixed(3)} -> ` : ""}
-                    {match.similarity.toFixed(3)}
+                    {baseline != null ? `${safeDisplaySimilarity(baseline).toFixed(3)} -> ` : ""}
+                    {safeDisplaySimilarity(match.similarity, baseline ?? 0).toFixed(3)}
                     <small>{match.source === "generalized" ? " generalized" : " local"}</small>
                   </span>
                   <span className={delta >= 0 ? "drag-change-delta positive" : "drag-change-delta negative"}>
@@ -1283,7 +1294,7 @@ function CandidatePanel({
               ) : null}
               {showGroundTruth && modelId !== "codebert" && candidate.isGroundTruth ? <small className="ground-truth-label">Ground truth</small> : null}
             </span>
-            <span className="score" title={`similarity ${candidate.similarity.toFixed(3)}`}>{candidate.similarity.toFixed(3)}</span>
+            <span className="score" title={`similarity ${safeDisplaySimilarity(candidate.similarity).toFixed(3)}`}>{safeDisplaySimilarity(candidate.similarity).toFixed(3)}</span>
             </button>
           </div>
         ))}
@@ -1330,7 +1341,7 @@ function AdjudicationPanel({
               <div className="adjudication-candidate-title">
                 <div>
                   <strong>{summary?.metadata.funcName || candidate.metadata.funcName || candidate.id}</strong>
-                  <span>Rank {summary?.rank ?? "-"} · sim {(summary?.similarity ?? candidate.similarity).toFixed(3)}</span>
+                  <span>Rank {summary?.rank ?? "-"} · sim {safeDisplaySimilarity(summary?.similarity ?? candidate.similarity).toFixed(3)}</span>
                 </div>
                 <button className="adjudication-reference-action" onClick={() => onChooseReference(candidate)} disabled={choosingReference}><BookOpenCheck size={13} /> Use as reference</button>
               </div>
@@ -1453,7 +1464,7 @@ function DiagnosticsPanel({
                 style={{ borderColor: link.color, background: `${link.color}22` }}
                 onClick={() => onManualLink(link)}
               >
-                {`${displayToken(link.queryToken)} -> ${displayToken(link.codeToken)} · ${link.similarity.toFixed(2)}`}
+                {`${displayToken(link.queryToken)} -> ${displayToken(link.codeToken)} · ${safeDisplaySimilarity(link.similarity).toFixed(2)}`}
               </button>
             )) : <span className="meta-line">No manual link</span>}
           </div>
@@ -1465,7 +1476,7 @@ function DiagnosticsPanel({
           {pairs.length ? pairs.map((pair) => (
             <div key={pair.id} className="metric-row">
               <span>{displayToken(pair.a.label)} / {displayToken(pair.b.label)}</span>
-              <strong>{pair.distance.toFixed(1)} · sim {pair.similarity.toFixed(2)}</strong>
+              <strong>{pair.distance.toFixed(1)} · sim {safeDisplaySimilarity(pair.similarity).toFixed(2)}</strong>
             </div>
           )) : <div className="meta-line">Select at least two tokens.</div>}
         </div>
@@ -1476,7 +1487,7 @@ function DiagnosticsPanel({
               <span>{displayToken(item.node.label)}</span>
               <strong>
                 {neighborSignals[item.node.id]?.status && neighborSignals[item.node.id].status !== "stable" ? `${neighborSignals[item.node.id].status} ` : ""}
-                {item.distance.toFixed(1)} · sim {item.similarity.toFixed(2)}
+                {item.distance.toFixed(1)} · sim {safeDisplaySimilarity(item.similarity).toFixed(2)}
               </strong>
             </div>
           )) : <div className="meta-line">Select one token.</div>}
@@ -1948,7 +1959,7 @@ function CodeViewer({
       <div className="panel-title">Code Viewer</div>
       <div className="code-meta">
         <span>{candidate.metadata.funcName}</span>
-        <span>similarity {(displaySimilarity ?? candidate.similarity).toFixed(3)}</span>
+        <span>similarity {safeDisplaySimilarity(displaySimilarity ?? candidate.similarity).toFixed(3)}</span>
       </div>
       <div className="code-scroll">
         <div className="code-lines">
@@ -2087,7 +2098,7 @@ function BaselineCodeViewer({
       <div className="panel-title">Code Viewer</div>
       <div className="code-meta">
         <span>{candidate.metadata.funcName || candidate.id}</span>
-        <span>similarity {(displaySimilarity ?? candidate.similarity).toFixed(3)}</span>
+        <span>similarity {safeDisplaySimilarity(displaySimilarity ?? candidate.similarity).toFixed(3)}</span>
       </div>
       <pre className="baseline-code-content">{withoutLeadingFunctionDocstring(candidate.rawCode)}</pre>
     </section>

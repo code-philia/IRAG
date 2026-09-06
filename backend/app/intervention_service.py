@@ -76,7 +76,7 @@ TARGET_REFERENCE_BRIDGE_RERANK_WEIGHT_BY_TEST = {
 PUSH_CONTRASTIVE_WEIGHT = 3.80
 INTERVENTION_TOP_K = 20
 SIMILARITY_SATURATION_EXPONENT = 1.40
-SIMILARITY_DISPLAY_CEILING = 0.98
+SIMILARITY_DISPLAY_CEILING = 0.95
 FULL_EVAL_FLOAT_IN_TEST_IDS = {"2797"}
 GT_MONOTONIC_GUARD_TEST_IDS = {"csn_11087"}
 CSN_8884_BRIDGE_SOURCE_CANDIDATE_ID = "code_1012324"
@@ -296,17 +296,46 @@ def _generalized_code_clusters(code_idx: int) -> list[dict[str, Any]]:
     return updated
 
 
+def _bounded_display_similarity(value: Any, fallback: float = 0.0) -> float:
+    """Keep internal masks and non-finite scores out of participant payloads."""
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        score = float(fallback)
+    if not math.isfinite(score) or score <= -1e6:
+        score = float(fallback)
+    return max(0.0, min(SIMILARITY_DISPLAY_CEILING, score))
+
+
+def _bound_candidate_display_scores(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    bounded: list[dict[str, Any]] = []
+    for candidate in candidates:
+        item = dict(candidate)
+        original = _bounded_display_similarity(
+            item.get("originalSimilarity", item.get("similarity", 0.0))
+        )
+        current = _bounded_display_similarity(item.get("similarity"), original)
+        item["originalSimilarity"] = round(original, 6)
+        item["similarity"] = round(current, 6)
+        item["similarityDelta"] = round(current - original, 6)
+        for key in ("dragSimilarity", "representationOriginal", "representationGeneralized"):
+            if key in item:
+                item[key] = round(_bounded_display_similarity(item[key], original), 6)
+        bounded.append(item)
+    return bounded
+
+
 def _manual_boost(similarity: float) -> float:
     return 0.04 + 0.08 * max(0.0, min(1.0, float(similarity)))
 
 
 def _saturating_similarity_update(original_similarity: float, raw_delta: float) -> tuple[float, float]:
     """Apply a bounded edit with diminishing returns near either score bound."""
-    baseline = max(0.0, min(1.0, float(original_similarity)))
+    baseline = _bounded_display_similarity(original_similarity)
     if raw_delta >= 0:
-        available_space = max(0.0, 1.0 - baseline)
+        available_space = max(0.0, SIMILARITY_DISPLAY_CEILING - baseline)
         effective_delta = float(raw_delta) * available_space ** SIMILARITY_SATURATION_EXPONENT
-        updated = min(max(baseline, SIMILARITY_DISPLAY_CEILING), baseline + effective_delta)
+        updated = min(SIMILARITY_DISPLAY_CEILING, baseline + effective_delta)
     else:
         available_space = max(0.0, baseline)
         effective_delta = float(raw_delta) * available_space ** SIMILARITY_SATURATION_EXPONENT
@@ -470,7 +499,7 @@ def apply_manual_link(payload: dict[str, Any]) -> dict[str, Any]:
         "link": generated_links[0] if generated_links else None,
         "links": links_by_candidate.get(candidate_id, []),
         "linksByCandidate": links_by_candidate,
-        "candidates": reranked,
+        "candidates": _bound_candidate_display_scores(reranked),
         "diagnostic": {
             "distance": round(distance, 3),
             "similaritySource": "xsearch_step7000_token_cosine",
@@ -567,7 +596,7 @@ def apply_drag_rerank(payload: dict[str, Any]) -> dict[str, Any]:
         )
     response = {
         "status": "ok",
-        "candidates": reranked,
+        "candidates": _bound_candidate_display_scores(reranked),
         "generalizedMatchesByCandidate": details,
         "activeCandidate": active_candidate,
         "activeGraph": active_graph,
