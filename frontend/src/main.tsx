@@ -1252,11 +1252,21 @@ function CandidatePanel({
   adjudicationIds: string[];
   onAdjudicationToggle: (candidate: CandidateSummary) => void;
 }) {
+  // Rerank responses update each candidate's displayed rank, but not every
+  // response path guarantees that the array itself is returned in that same
+  // order. Keep presentation order derived from rank so React cannot retain a
+  // former Rank 1 at the leading edge after it has moved to Rank 2.
+  const orderedCandidates = useMemo(() => candidates
+    .map((candidate, index) => ({ candidate, index }))
+    .sort((first, second) => first.candidate.rank - second.candidate.rank
+      || second.candidate.similarity - first.candidate.similarity
+      || first.index - second.index)
+    .map(({ candidate }) => candidate), [candidates]);
   return (
     <aside className="panel candidate-panel">
       <div className="panel-title">Ranked Candidates</div>
       <div className="candidate-list">
-        {candidates.map((candidate) => (
+        {orderedCandidates.map((candidate) => (
           <div key={candidate.id} className="candidate-row">
             <button
               className={(adjudicationMode ? adjudicationIds.includes(candidate.id) : selectedId === candidate.id) ? "candidate active" : "candidate"}
