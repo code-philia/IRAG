@@ -1263,6 +1263,7 @@ function CandidatePanel({
   adjudicationIds: string[];
   onAdjudicationToggle: (candidate: CandidateSummary) => void;
 }) {
+  const candidateListRef = useRef<HTMLDivElement | null>(null);
   // Rerank responses update each candidate's displayed rank, but not every
   // response path guarantees that the array itself is returned in that same
   // order. Keep presentation order derived from rank so React cannot retain a
@@ -1273,10 +1274,19 @@ function CandidatePanel({
       || second.candidate.similarity - first.candidate.similarity
       || first.index - second.index)
     .map(({ candidate }) => candidate), [candidates]);
+  const leadingCandidateId = orderedCandidates[0]?.id ?? null;
+
+  useEffect(() => {
+    // Browsers preserve the old first card as a horizontal scroll anchor when
+    // React inserts a newly promoted Rank 1 before it. Always reveal the new
+    // leader instead of leaving it just outside the viewport on the left.
+    candidateListRef.current?.scrollTo({ left: 0, behavior: "smooth" });
+  }, [leadingCandidateId]);
+
   return (
     <aside className="panel candidate-panel">
       <div className="panel-title">Ranked Candidates</div>
-      <div className="candidate-list">
+      <div ref={candidateListRef} className="candidate-list">
         {orderedCandidates.map((candidate) => (
           <div key={candidate.id} className="candidate-row">
             <button
