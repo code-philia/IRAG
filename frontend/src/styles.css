@@ -1018,6 +1018,10 @@ h1 {
   background: #f4f7fa;
 }
 
+.code-line.line-dimmed {
+  opacity: 0.42;
+}
+
 .code-line.block-line {
   border-left-width: 3px;
   border-left-color: #d8dee8;

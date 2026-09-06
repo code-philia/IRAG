@@ -1081,7 +1081,7 @@ function QueryPanel({
   }, [externalImpacts, queryPointMode, session.query.concepts]);
   return (
     <aside className="panel query-panel">
-      <div className="panel-title">Issue</div>
+      <div className="panel-title">Query</div>
       <div className="query-text">{session.query.rawText}</div>
       <div className="query-token-list">
         {session.query.tokens.map((token, index) => {
@@ -1222,7 +1222,7 @@ function QueryPanel({
 function BaselineQueryPanel({ session }: { session: SessionPayload | null }) {
   return (
     <aside className="panel query-panel baseline-query-panel">
-      <div className="panel-title">Issue</div>
+      <div className="panel-title">Query</div>
       {session ? (
         <>
           <div className="query-text">{session.query.rawText}</div>
@@ -1987,6 +1987,7 @@ function CodeViewer({
               : isHierarchyDetail
                 ? belongsToSelectedBlock && (lineSelected || hierarchyMatches.length > 0 || conceptSelected)
                 : lineSelected || conceptSelected;
+            const lineSelectionDimmed = selectedLines.length > 0 && !lineSelected;
             const indent = line.text.match(/^\s*/)?.[0] ?? "";
             const displayedLineNumber = displayLineNumberByRaw.get(line.lineNumber) ?? line.lineNumber;
             const displayedBlockStart = displayLineNumberByRaw.get(blockLineNumbers[0] ?? 0) ?? blockLineNumbers[0];
@@ -2000,7 +2001,7 @@ function CodeViewer({
                   </div>
                 ) : null}
                 <div
-                  className={`${levelActive ? "code-line active" : "code-line"}${canvasLevel === "block" ? " block-line" : ""}${isHierarchyDetail && belongsToSelectedBlock ? " hierarchy-detail-line" : ""}${isHierarchyDetail && selectedBlockId && !belongsToSelectedBlock ? " hierarchy-outside-scope" : ""}${blockStart ? " block-start" : ""}${blockEnd ? " block-end" : ""}${blockSelected ? " block-selected" : ""}`}
+                  className={`${levelActive ? "code-line active" : "code-line"}${lineSelectionDimmed ? " line-dimmed" : ""}${canvasLevel === "block" ? " block-line" : ""}${isHierarchyDetail && belongsToSelectedBlock ? " hierarchy-detail-line" : ""}${isHierarchyDetail && selectedBlockId && !belongsToSelectedBlock ? " hierarchy-outside-scope" : ""}${blockStart ? " block-start" : ""}${blockEnd ? " block-end" : ""}${blockSelected ? " block-selected" : ""}`}
                   style={hierarchyColors.length ? {
                     borderLeftColor: hierarchyColors[0],
                     background: hierarchyColors.length === 1
@@ -2029,7 +2030,7 @@ function CodeViewer({
                     return (
                       <Fragment key={idx}>
                       <button
-                        className={`${selected ? "line-token active" : "line-token"}${recommended ? " inspect-token" : ""}${showTokenHighlight && manual ? " manual-token" : ""}${canvasLevel !== "line_tokens" && showTokenHighlight && hasTokenFocus && !selected ? " dimmed" : ""}`}
+                        className={`${selected ? "line-token active" : "line-token"}${recommended ? " inspect-token" : ""}${showTokenHighlight && manual ? " manual-token" : ""}${canvasLevel !== "line_tokens" && showTokenHighlight && hasTokenFocus && !selected && !lineSelected ? " dimmed" : ""}`}
                         title={inspectLabel}
                         aria-label={inspectLabel}
                         style={showTokenHighlight ? (
@@ -3861,9 +3862,9 @@ function GenerationPanel({
           <pre className="generation-context-code">{withoutLeadingFunctionDocstring(selection.candidate.rawCode)}</pre>
         </details>
       </div>
-      <section className="generation-reference-analysis" aria-label="Reference hint">
+      {APP_MODE === "demo" ? <section className="generation-reference-analysis" aria-label="Reference hint">
         {!hint ? <div className="generation-reference-analysis-header"><div className="panel-title">Need help understanding this reference?</div><button onClick={onHint} disabled={hintLoading}>{hintLoading ? "Loading hint..." : "Show Hint"}</button></div> : <><div className="panel-title">Reference Hint</div><div className="reference-hint"><strong>What it does</strong><p>{hint.whatItDoes}</p><strong>Useful clue</strong><p>{hint.usefulClue}</p></div></>}
-      </section>
+      </section> : null}
       <div className="generation-actions">
         <button className="primary" onClick={() => onGenerate("interactive_rag")} disabled={loading}>{loading ? <Loader2 size={16} className="spin" /> : <CirclePlay size={16} />} Generate With Selected Reference</button>
         {showInternal ? <button onClick={() => onGenerate("no_rag")} disabled={loading}>Generate Without Reference</button> : null}
@@ -4267,6 +4268,7 @@ function App() {
     if (activeCandidateId === next.id) return;
     if (candidate) logEvent("candidate_close", { testId: session.testId, candidateId: candidate.id });
     const requestId = ++loadRequestRef.current;
+    ++dragRerankRequestRef.current;
     const previousCandidateId = candidate?.id ?? null;
     const hasDragEdits = Object.values(dragPositionsByCandidate).some((positions) => Object.keys(positions).length > 0)
       || Object.values(dragTrailsByCandidate).some((trails) => Object.values(trails).some((trail) => trail.length > 1));
@@ -4644,7 +4646,6 @@ function App() {
       });
       setCandidates(result.candidates);
       resetPayloadCaches();
-      resetPayloadCaches();
       setSelectedTokenIds((current) => [...new Set([...current, queryNode.id, codeNode.id])].slice(-6));
       setSelectedManualLinkId(result.link?.id ?? null);
       setLinkDraft(null);
@@ -4687,6 +4688,7 @@ function App() {
         throw new Error("The rerank response did not include any candidates.");
       }
       setCandidates(result.candidates);
+      resetPayloadCaches();
       let generalized: Record<string, DragMatchBundle> = {};
       if (session.capabilities?.external_effects !== false) {
         generalized = buildGeneralizedVisualMatches(result.generalizedMatchesByCandidate, session);
