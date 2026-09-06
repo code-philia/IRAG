@@ -1873,6 +1873,7 @@ function CodeViewer({
   dragTokenMatches,
   dragLineMatches,
   displaySimilarity,
+  allowPlainText = false,
   onBlock,
   onLine,
   onToken
@@ -1889,10 +1890,12 @@ function CodeViewer({
   dragTokenMatches: DragTokenMatch[];
   dragLineMatches: DragLineMatch[];
   displaySimilarity?: number;
+  allowPlainText?: boolean;
   onBlock: (blockId: string) => void;
   onLine: (lineNumber: number) => void;
   onToken: (id: string) => void;
 }) {
+  const [plainTextMode, setPlainTextMode] = useState(false);
   const selectedConceptSet = useMemo(() => new Set(selectedConcepts), [selectedConcepts]);
   const selectedLineSet = useMemo(() => new Set(selectedLines), [selectedLines]);
   const selectedTokenSet = useMemo(() => new Set(selectedTokenIds), [selectedTokenIds]);
@@ -1966,12 +1969,32 @@ function CodeViewer({
   const hasTokenFocus = selectedConcepts.length > 0 || selectedLines.length > 0 || selectedTokenIds.some((id) => id.startsWith("c_tok_")) || manualLinks.length > 0;
   return (
     <section className="panel code-viewer">
-      <div className="panel-title">Code Viewer</div>
+      <div className="code-viewer-header">
+        <div className="panel-title">Code Viewer</div>
+        {allowPlainText ? (
+          <div className="code-view-mode-toggle" role="group" aria-label="Code display mode">
+            <button
+              type="button"
+              className={!plainTextMode ? "active" : ""}
+              aria-pressed={!plainTextMode}
+              onClick={() => setPlainTextMode(false)}
+            >Highlighted</button>
+            <button
+              type="button"
+              className={plainTextMode ? "active" : ""}
+              aria-pressed={plainTextMode}
+              onClick={() => setPlainTextMode(true)}
+            >Plain Text</button>
+          </div>
+        ) : null}
+      </div>
       <div className="code-meta">
         <span>{candidate.metadata.funcName}</span>
         <span>similarity {safeDisplaySimilarity(displaySimilarity ?? candidate.similarity).toFixed(3)}</span>
       </div>
-      <div className="code-scroll">
+      {plainTextMode && allowPlainText ? (
+        <pre className="baseline-code-content code-viewer-plain-content">{withoutLeadingFunctionDocstring(candidate.rawCode)}</pre>
+      ) : <div className="code-scroll">
         <div className="code-lines">
           {displayCodeLines.map((line) => {
             const lineSelected = selectedLineSet.has(line.lineNumber);
@@ -2090,7 +2113,7 @@ function CodeViewer({
             );
           })}
         </div>
-      </div>
+      </div>}
     </section>
   );
 }
@@ -5413,11 +5436,11 @@ function App() {
                     if (event.key === "ArrowRight") { event.preventDefault(); adjustCodePaneWidth(32); }
                   }}
                 />
-                <CodeViewer candidate={candidate} session={session} graph={graph} canvasLevel={canvasLevel} selectedBlockId={selectedBlockId} displaySimilarity={currentCandidateSummary?.similarity} selectedConcepts={selectedConcepts} selectedLines={selectedLines} selectedTokenIds={selectedTokenIds} manualLinks={manualLinks} dragTokenMatches={currentDragMatches.tokenMatches} dragLineMatches={currentDragMatches.lineMatches} onBlock={handleHierarchyBlock} onLine={handleCodeViewerLine} onToken={selectTokenId} />
+                <CodeViewer candidate={candidate} session={session} graph={graph} canvasLevel={canvasLevel} selectedBlockId={selectedBlockId} displaySimilarity={currentCandidateSummary?.similarity} selectedConcepts={selectedConcepts} selectedLines={selectedLines} selectedTokenIds={selectedTokenIds} manualLinks={manualLinks} dragTokenMatches={currentDragMatches.tokenMatches} dragLineMatches={currentDragMatches.lineMatches} allowPlainText={appMode === "study" || appMode === "study_dev"} onBlock={handleHierarchyBlock} onLine={handleCodeViewerLine} onToken={selectTokenId} />
               </>
             ) : (
               <>
-                <CodeViewer candidate={candidate} session={session} graph={graph} canvasLevel={canvasLevel} selectedBlockId={selectedBlockId} displaySimilarity={currentCandidateSummary?.similarity} selectedConcepts={selectedConcepts} selectedLines={selectedLines} selectedTokenIds={selectedTokenIds} manualLinks={manualLinks} dragTokenMatches={currentDragMatches.tokenMatches} dragLineMatches={currentDragMatches.lineMatches} onBlock={handleHierarchyBlock} onLine={handleCodeViewerLine} onToken={selectTokenId} />
+                <CodeViewer candidate={candidate} session={session} graph={graph} canvasLevel={canvasLevel} selectedBlockId={selectedBlockId} displaySimilarity={currentCandidateSummary?.similarity} selectedConcepts={selectedConcepts} selectedLines={selectedLines} selectedTokenIds={selectedTokenIds} manualLinks={manualLinks} dragTokenMatches={currentDragMatches.tokenMatches} dragLineMatches={currentDragMatches.lineMatches} allowPlainText={appMode === "study" || appMode === "study_dev"} onBlock={handleHierarchyBlock} onLine={handleCodeViewerLine} onToken={selectTokenId} />
                 <div
                   className="pane-resize-handle"
                   role="separator"
